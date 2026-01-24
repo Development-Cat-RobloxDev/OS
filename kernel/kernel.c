@@ -1,21 +1,44 @@
-typedef unsigned char  u8;
-typedef unsigned short u16;
+// kernel.c
 
-volatile u16* vga = (u16*)0xB8000;
-int cursor = 0;
+typedef unsigned char uint8_t;
 
-void putc(char c)
+#define VIDEO_MEMORY    (0xB8000)   // VGAメモリの開始アドレス
+#define WHITE_ON_BLACK  (0x07)      // 白文字/黒背景の属性
+
+// 画面クリア関数
+void clear_screen(void)
 {
-    vga[cursor++] = (0x0F << 8) | c;
+    uint8_t* video = (uint8_t*)VIDEO_MEMORY;    // VGAメモリポインタ
+    uint8_t attr = WHITE_ON_BLACK;  // 属性
+
+    for (int i = 0; i < 80 * 25; i++)
+    {
+        *video++ = ' ';     // 空白文字
+        *video++ = attr;    // 属性を書き込み
+    }
 }
 
-void puts(const char* s)
+// 文字列表示関数
+void print_string(const char* str)
 {
-    while (*s) putc(*s++);
+    uint8_t* video = (uint8_t*)VIDEO_MEMORY;    // VGAメモリポインタ
+    uint8_t attr = WHITE_ON_BLACK;  // 属性
+
+    while (*str)
+    {
+        *video++ = *str++;  // 文字を書き込み
+        *video++ = attr;    // 属性を書き込み
+    }
 }
 
+// カーネルメイン関数
 void kernel_main(void)
 {
-    puts("Hello 32-bit kernel!");
-    for (;;);
+    clear_screen();                     // 画面をクリア
+    print_string("Kernel started!");    // 文字列を表示
+
+    while (1)                           // 無限ループ
+    {
+        __asm__ volatile ("cli; hlt");  // 停止
+    }
 }

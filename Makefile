@@ -1,30 +1,12 @@
-ASM     = nasm
-CC      = gcc
-LD      = gld
-QEMU    = qemu-system-x86_64
+all:
+	nasm -f bin BootLoader/BootLoader.asm -o Build/BootLoader.bin
+	i686-elf-gcc -ffreestanding -c Kernel/Kernel_Entry.c -o Build/Kernel_Entry.o
+	i686-elf-gcc -ffreestanding -c Kernel/Kernel.c -o Build/Kernel.o
+	i686-elf-ld -T Kernel/kernel.ld -o Build/Kernel.bin Build/Kernel_Entry.o Build/Kernel.o --oformat binary
+	cat Build/BootLoader.bin Build/Kernel.bin > Build/OS.img
 
-CFLAGS  = -ffreestanding -m32 -fno-pie -fno-stack-protector
-LDFLAGS = -m elf_i386
+run:
+	qemu-system-i386 -fda Build/OS.img
 
-BOOT_DIR   = bootloader
-KERNEL_DIR = kernel
-BUILD_DIR  = build
 
-BOOT_BIN   = $(BUILD_DIR)/bootloader.bin
-KERNEL_OBJ = $(BUILD_DIR)/kernel.o
-OS_IMAGE   = $(BUILD_DIR)/os.img
-
-all: $(OS_IMAGE)
-
-$(OS_IMAGE): $(BOOT_BIN)
-	cat $^ > $@
-
-$(BOOT_BIN): $(BOOT_DIR)/bootloader.asm
-	mkdir -p $(BUILD_DIR)
-	$(ASM) -f bin $< -o $@
-
-run: $(OS_IMAGE)
-	$(QEMU) $(OS_IMAGE)
-
-clean:
-	rm -rf $(BUILD_DIR)
+.PHONY: all run clean
