@@ -31,5 +31,5 @@ bool fat32_init(void);
 bool fat32_find_file(const char *filename, FAT32_FILE *file);
 bool fat32_read_file(FAT32_FILE *file, uint8_t *buffer);
 bool fat32_write_file(FAT32_FILE *file, const uint8_t *buffer);
-// ファイルサイズ取得
 uint32_t fat32_get_file_size(FAT32_FILE *file);
+void fat32_list_root_files(void);

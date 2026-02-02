@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 .PHONY: all run clean image
 
 ARCH := x86_64
@@ -52,18 +51,6 @@ $(BUILD_DIR)/BOOTX64.EFI: $(BUILD_DIR)/Loader.o
 	   /usr/lib/libefi.a \
 	   /usr/lib/libgnuefi.a \
 	   -o $@.so
-=======
-all:
-	nasm -f bin BootLoader/BootLoader.asm -o Build/BootLoader.bin
-	nasm -f elf32 Kernel/Kernel_Entry.asm -o Build/Kernel_Entry.o
-	i686-elf-gcc -ffreestanding -m16 -c Kernel/Kernel.c -o Build/Kernel.o
-	i686-elf-ld -T Kernel/Kernel_Linker.ld -o Build/Kernel.elf Build/Kernel_Entry.o Build/Kernel.o
-	i686-elf-objcopy -O binary Build/Kernel.elf Build/Kernel.bin
-	cat Build/BootLoader.bin Build/Kernel.bin > Build/OS.img
-
-run:
-	qemu-system-i386 -drive format=raw,file=Build/OS.img
->>>>>>> 941ad0ba8e3ed1b8ba7b78d2b71200f47d47397b
 
 	objcopy -j .text -j .sdata -j .data -j .dynamic \
 	        -j .dynsym -j .rel -j .rela -j .reloc \
@@ -162,6 +149,7 @@ image: all
 	    sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
 	    sudo cp $(KERNEL_ELF) /mnt/EFI/BOOT/Kernel_Main.ELF; \
 	    sudo cp Kernel/LOGO.PNG /mnt/LOGO.PNG; \
+		sudo cp Kernel/NOTOSANS.TTF /mnt/NOTOSANS.TTF; \
 	    sync; sudo umount /mnt; \
 	    sudo losetup -d $$LOOP; \
 	done
@@ -176,16 +164,11 @@ run: image
 		-drive format=raw,file=$(IMAGE) \
    		-usb \
    		-device usb-mouse \
-   		-device usb-kbd
+   		-device usb-kbd \
+		-serial stdio
 
 # ========================================
 # クリーン
 # ========================================
 clean:
-<<<<<<< HEAD
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
-=======
-	rm -rf Build/*
-
-.PHONY: all run clean
->>>>>>> 941ad0ba8e3ed1b8ba7b78d2b71200f47d47397b
