@@ -11,5 +11,6 @@
 #define PAGE_PS      (1ULL << 7)
 
 void init_paging(uint64_t framebuffer_base, uint32_t framebuffer_size);
+void *map_mmio_virt(uint64_t phys_addr);
 
 #endif

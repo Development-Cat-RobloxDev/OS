@@ -140,10 +140,11 @@ image: all
 run: image
 	qemu-system-x86_64 \
 		-m 512M \
+		-vga none \
+		-device virtio-vga \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=$(IMAGE) \
-		-serial stdio \
-		-device virtio-gpu
+		-serial stdio
 
 clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
