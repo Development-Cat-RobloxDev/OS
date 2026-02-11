@@ -5,9 +5,9 @@
 #include "GDT/GDT_Main.h"
 #include "IO/IO_Main.h"
 #include "Drivers/FileSystem/FAT32/FAT32_Main.h"
+#include "Drivers/Display/VirtIO/VirtIO.h"
 #include "Memory/Other_Utils.h"
 #include "Syscall/Syscall_Main.h"
-#include "FrameBuffer/FrameBuffer_Main.h"
 #include "Serial.h"
 
 #define COM1_PORT 0x3F8
@@ -23,7 +23,6 @@ __attribute__((aligned(16)))
 static uint8_t user_stack[USER_STACK_SIZE];
 
 #define PT_LOAD 1
-static FRAMEBUFFER kernel_fb;
 
 typedef struct {
     unsigned char e_ident[16];
@@ -251,14 +250,8 @@ void kernel_main(BOOT_INFO *boot_info) {
     serial_write_string("[OS] Initializing GDT...\n");
     init_gdt();
 
-    serial_write_string("[OS] Initializing framebuffer...\n");
-    kernel_fb.base   = boot_info->FrameBufferBase;
-    kernel_fb.width  = boot_info->HorizontalResolution;
-    kernel_fb.height = boot_info->VerticalResolution;
-    kernel_fb.pitch  = boot_info->PixelsPerScanLine * 4;
-    kernel_fb.bpp    = 32;
-
-    framebuffer_init(&kernel_fb);
+    serial_write_string("[OS] Initializing VirtIO...\n");
+    virtio_init_gpu();
     
     serial_write_string("[OS] Initializing syscall...\n");
     syscall_init(); 

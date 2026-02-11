@@ -46,9 +46,10 @@ KERNEL_C_SRCS := \
 	Kernel/IO/IO_Main.c \
 	Kernel/GDT/GDT_Main.c \
 	Kernel/Drivers/FileSystem/FAT32/FAT32_Main.c \
+	Kernel/Drivers/Display/VirtIO/VirtIO.c \
+	Kernel/Drivers/PCI/PCI_Main.c \
 	Kernel/Syscall/Syscall_Init.c \
 	Kernel/Syscall/Syscall_Dispatch.c \
-	Kernel/FrameBuffer/FrameBuffer_Main.c
 
 KERNEL_ASM_SRCS := \
 	Kernel/Paging/Paging.asm \
@@ -141,7 +142,8 @@ run: image
 		-m 512M \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=$(IMAGE) \
-		-serial stdio
+		-serial stdio \
+		-device virtio-gpu
 
 clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)

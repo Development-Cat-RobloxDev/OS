@@ -1,6 +1,5 @@
 #include "Syscall_Main.h"
 #include "IO/IO_Main.h"
-#include "../FrameBuffer/FrameBuffer_Main.h"
 #include "../Serial.h"
 #include <stdint.h>
 
@@ -23,10 +22,6 @@ void syscall_dispatch(uint64_t num,
 
     case SYSCALL_SERIAL_PUTS:
         serial_write_string((const char*)arg1);
-        break;
-
-    case SYSCALL_SERIAL_FB_WHITE:
-        framebuffer_clear(0x00FFFFFF);
         break;
 
     default:
