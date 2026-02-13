@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "../../../Serial.h"
@@ -181,6 +182,12 @@ typedef struct __attribute__((packed)) {
     virtio_gpu_ctrl_hdr_t hdr;
     virtio_gpu_display_one_t pmodes[16];
 } virtio_gpu_resp_display_info_t;
+
+static int g_gpu_ready = 0;
+static uint32_t g_gpu_width = 0;
+static uint32_t g_gpu_height = 0;
+static uint32_t *g_gpu_fb = NULL;
+static virtqueue_t g_gpu_controlq;
 
 static inline uint32_t align_up_u32(uint32_t value, uint32_t align) {
     return (value + align - 1u) & ~(align - 1u);
@@ -596,14 +603,19 @@ static int gpu_cmd_resource_flush(virtqueue_t *vq, uint32_t width, uint32_t heig
     return resp.hdr.type == VIRTIO_GPU_RESP_OK_NODATA;
 }
 
-void *virtio_init_gpu(void) {
+bool virtio_gpu_init(void) {
     virtio_gpu_pci_t gpu;
     virtio_pci_transport_t t;
     virtqueue_t controlq;
 
+    g_gpu_ready = 0;
+    g_gpu_width = 0;
+    g_gpu_height = 0;
+    g_gpu_fb = NULL;
+
     if (!find_virtio_gpu(&gpu)) {
         serial_write_string("[OS] [VIRTIO] GPU device not found\n");
-        return NULL;
+        return false;
     }
 
     serial_write_string("[OS] [VIRTIO] GPU found (IRQ ");
@@ -612,17 +624,17 @@ void *virtio_init_gpu(void) {
 
     if (!virtio_pci_find_caps(&gpu, &t)) {
         serial_write_string("[OS] [VIRTIO] Required PCI capabilities are missing\n");
-        return NULL;
+        return false;
     }
 
     if (!virtio_pci_device_init(&gpu, &t)) {
         serial_write_string("[OS] [VIRTIO] Device init failed\n");
-        return NULL;
+        return false;
     }
 
     if (!virtqueue_init_ctrl(&t, &controlq, 0)) {
         serial_write_string("[OS] [VIRTIO] Control queue init failed\n");
-        return NULL;
+        return false;
     }
 
     uint8_t status = common_read8(t.common_cfg, 20);
@@ -635,41 +647,88 @@ void *virtio_init_gpu(void) {
     uint64_t pixel_count = (uint64_t)width * (uint64_t)height;
     if (pixel_count == 0 || pixel_count > (64ull * 1024ull * 1024ull)) {
         serial_write_string("[OS] [VIRTIO] Invalid display size\n");
-        return NULL;
+        return false;
     }
 
     uint32_t fb_bytes = (uint32_t)(pixel_count * 4u);
     uint32_t *fb = (uint32_t *)kmalloc(fb_bytes);
     if (!fb) {
         serial_write_string("[OS] [VIRTIO] Framebuffer allocation failed\n");
-        return NULL;
+        return false;
     }
 
-    for (uint64_t i = 0; i < pixel_count; i++) {
-        fb[i] = 0x00FF0000u;
-    }
+    memset(fb, 0, fb_bytes);
 
     if (!gpu_cmd_resource_create_2d(&controlq, width, height)) {
         serial_write_string("[OS] [VIRTIO] RESOURCE_CREATE_2D failed\n");
-        return NULL;
+        return false;
     }
     if (!gpu_cmd_resource_attach_backing(&controlq, fb, fb_bytes)) {
         serial_write_string("[OS] [VIRTIO] ATTACH_BACKING failed\n");
-        return NULL;
+        return false;
     }
     if (!gpu_cmd_set_scanout(&controlq, width, height)) {
         serial_write_string("[OS] [VIRTIO] SET_SCANOUT failed\n");
-        return NULL;
+        return false;
     }
-    if (!gpu_cmd_transfer_to_host_2d(&controlq, width, height)) {
-        serial_write_string("[OS] [VIRTIO] TRANSFER_TO_HOST_2D failed\n");
-        return NULL;
+    serial_write_string("[OS] [VIRTIO] Init complete\n");
+    g_gpu_controlq = controlq;
+    g_gpu_width = width;
+    g_gpu_height = height;
+    g_gpu_fb = fb;
+    g_gpu_ready = 1;
+    return true;
+}
+
+bool virtio_gpu_is_ready(void) {
+    return g_gpu_ready != 0;
+}
+
+uint32_t virtio_gpu_width(void) {
+    return g_gpu_width;
+}
+
+uint32_t virtio_gpu_height(void) {
+    return g_gpu_height;
+}
+
+void virtio_gpu_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
+    if (!g_gpu_ready || !g_gpu_fb || x >= g_gpu_width || y >= g_gpu_height) {
+        return;
     }
-    if (!gpu_cmd_resource_flush(&controlq, width, height)) {
-        serial_write_string("[OS] [VIRTIO] RESOURCE_FLUSH failed\n");
-        return NULL;
+    g_gpu_fb[(uint64_t)y * g_gpu_width + x] = color;
+}
+
+void virtio_gpu_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    if (!g_gpu_ready || !g_gpu_fb || w == 0 || h == 0) {
+        return;
+    }
+    if (x >= g_gpu_width || y >= g_gpu_height) {
+        return;
+    }
+    uint32_t x_end = x + w;
+    uint32_t y_end = y + h;
+    if (x_end > g_gpu_width || x_end < x) {
+        x_end = g_gpu_width;
+    }
+    if (y_end > g_gpu_height || y_end < y) {
+        y_end = g_gpu_height;
     }
 
-    serial_write_string("[OS] [VIRTIO] Screen filled via VirtIO-GPU\n");
-    return (void *)fb;
+    for (uint32_t py = y; py < y_end; ++py) {
+        uint64_t row = (uint64_t)py * g_gpu_width;
+        for (uint32_t px = x; px < x_end; ++px) {
+            g_gpu_fb[row + px] = color;
+        }
+    }
+}
+
+void virtio_gpu_present(void) {
+    if (!g_gpu_ready) {
+        return;
+    }
+    if (!gpu_cmd_transfer_to_host_2d(&g_gpu_controlq, g_gpu_width, g_gpu_height)) {
+        return;
+    }
+    (void)gpu_cmd_resource_flush(&g_gpu_controlq, g_gpu_width, g_gpu_height);
 }

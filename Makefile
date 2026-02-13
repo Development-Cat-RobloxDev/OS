@@ -35,6 +35,10 @@ LOADER_CFLAGS := \
 	-Wall -Wextra -DEFI_FUNCTION_WRAPPER
 
 USERLAND_LDFLAGS := -T Userland/Userland.ld -nostdlib --build-id=none
+USERLAND_CFLAGS := \
+	-ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
+	-mno-red-zone -nostdlib -nostartfiles -nodefaultlibs \
+	-Wall -Wextra -MMD -MP
 
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
@@ -46,9 +50,12 @@ KERNEL_C_SRCS := \
 	Kernel/IO/IO_Main.c \
 	Kernel/GDT/GDT_Main.c \
 	Kernel/Drivers/FileSystem/FAT32/FAT32_Main.c \
+	Kernel/Drivers/Display/Display_Main.c \
 	Kernel/Drivers/Display/VirtIO/VirtIO.c \
 	Kernel/Drivers/PCI/PCI_Main.c \
+	Kernel/ProcessManager/ProcessManager_Create.c \
 	Kernel/Syscall/Syscall_Init.c \
+	Kernel/Syscall/Syscall_File.c \
 	Kernel/Syscall/Syscall_Dispatch.c \
 
 KERNEL_ASM_SRCS := \
@@ -57,7 +64,7 @@ KERNEL_ASM_SRCS := \
 	Kernel/IDT/IDT.asm \
 	Kernel/Syscall/Syscall_Entry.asm
 
-USERLAND_ASM_SRC := Userland/Userland.asm
+USERLAND_C_SRC := Userland/Userland.c
 
 KERNEL_OBJS := \
 	$(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) \
@@ -103,9 +110,9 @@ $(KERNEL_ELF): $(KERNEL_OBJS)
 	mkdir -p $(dir $@)
 	$(LD) $(KERNEL_LDFLAGS) $^ -o $@
 
-$(USERLAND_OBJ): $(USERLAND_ASM_SRC)
+$(USERLAND_OBJ): $(USERLAND_C_SRC)
 	mkdir -p $(dir $@)
-	$(NASM) -f elf64 $< -o $@
+	$(CC) $(USERLAND_CFLAGS) -c $< -o $@
 
 $(USERLAND_ELF): $(USERLAND_OBJ)
 	mkdir -p $(dir $@)
@@ -137,6 +144,39 @@ image: all
 		sudo losetup -d $$LOOP; \
 	done
 
+ISO_ROOT := $(IMAGE_DIR)/iso_root
+ESP_IMG  := $(IMAGE_DIR)/esp.iso
+
+image_esp: all
+	mkdir -p $(ISO_ROOT)/EFI/BOOT
+	mkdir -p $(ISO_ROOT)/Kernel
+
+	cp $(BOOTX64_EFI) $(ISO_ROOT)/EFI/BOOT/BOOTX64.EFI
+	cp $(KERNEL_ELF)  $(ISO_ROOT)/Kernel/Kernel_Main.ELF
+	cp $(USERLAND_ELF) $(ISO_ROOT)/URLD.ELF
+	cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT
+
+	dd if=/dev/zero of=$(ESP_IMG) bs=1M count=64
+	mkfs.fat -F32 $(ESP_IMG)
+
+	mkdir -p /tmp/esp_mount
+	sudo mount $(ESP_IMG) /tmp/esp_mount
+	sudo mkdir -p /tmp/esp_mount/EFI/BOOT
+	sudo cp $(BOOTX64_EFI) /tmp/esp_mount/EFI/BOOT/BOOTX64.EFI
+	sync
+	sudo umount /tmp/esp_mount
+
+	cp $(ESP_IMG) $(ISO_ROOT)/esp.iso
+
+	xorriso -as mkisofs \
+		-R -J \
+		-V "MY_OS" \
+		-o $(IMAGE) \
+		-eltorito-alt-boot \
+		-e esp.iso \
+		-no-emul-boot \
+		$(ISO_ROOT)
+
 run: image
 	qemu-system-x86_64 \
 		-m 512M \
@@ -150,3 +190,4 @@ clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
 
 -include $(KERNEL_OBJS:.o=.d)
+-include $(USERLAND_OBJ:.o=.d)

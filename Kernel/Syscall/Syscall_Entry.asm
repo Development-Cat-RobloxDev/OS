@@ -5,38 +5,63 @@ extern syscall_dispatch
 
 syscall_entry:
     swapgs
+    
+    mov [gs:0], rsp
+    
+    mov rsp, [gs:8]
+    
+    and rsp, ~0xF
+    sub rsp, 8
 
-    push rax
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push r8
-    push r9
-    push r10
+    ; Saved frame layout (rsp = index 0):
+    ; 0:rax 1:rdx 2:rsi 3:rdi 4:r8 5:r9 6:r10 7:r12
+    ; 8:r13 9:r14 10:r15 11:rbx 12:rbp 13:rcx 14:r11
     push r11
-
-    mov r11, rdi
-    mov rdi, rax
-    mov rax, rsi
-    mov rsi, r11
-    mov r11, rdx
-    mov rdx, rax
-    mov rcx, r11
-    mov r8,  r10
+    push rcx
+    push rbp
+    push rbx
+    push r15
+    push r14
+    push r13
+    push r12
+    push r10
+    push r9
+    push r8
+    push rdi
+    push rsi
+    push rdx
+    push rax
+    
+    mov rdi, rsp
+    mov rsi, rax
+    mov rdx, [rsp + 24]
+    mov rcx, [rsp + 16]
+    mov r8, [rsp + 8]
+    mov r9, [rsp + 48]
+    
     call syscall_dispatch
-
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
+    
+    mov rsp, rax
+    
     pop rax
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r8
+    pop r9
+    pop r10
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    pop rbx
+    pop rbp
+    pop rcx
+    pop r11
 
+    mov rsp, [gs:0]
+    
     swapgs
-    sysret
+    o64 sysret
 
 section .note.GNU-stack noalloc noexec nowrite progbits

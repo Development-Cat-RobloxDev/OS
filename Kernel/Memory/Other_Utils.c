@@ -1,18 +1,14 @@
 #include <stddef.h>
 #include <stdint.h>
-
-static uint8_t *heap_end   = (uint8_t*)0x800000;
-static uint8_t *heap_ptr   = (uint8_t*)0x100000;
+#include "Memory_Main.h"
 
 void* malloc(size_t size) {
-    if (heap_ptr + size > heap_end) return NULL;
-    void* ptr = heap_ptr;
-    heap_ptr += size;
-    return ptr;
+    if (size > UINT32_MAX) return NULL;
+    return kmalloc((uint32_t)size);
 }
 
 void free(void* ptr) {
-    (void)ptr;
+    kfree(ptr);
 }
 
 void* memcpy(void* dst, const void* src, size_t n){

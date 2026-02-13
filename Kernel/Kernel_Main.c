@@ -5,18 +5,21 @@
 #include "GDT/GDT_Main.h"
 #include "IO/IO_Main.h"
 #include "Drivers/FileSystem/FAT32/FAT32_Main.h"
-#include "Drivers/Display/VirtIO/VirtIO.h"
+#include "Drivers/Display/Display_Main.h"
 #include "Memory/Other_Utils.h"
 #include "Syscall/Syscall_Main.h"
+#include "Syscall/Syscall_File.h"
+#include "ProcessManager/ProcessManager.h"
 #include "Serial.h"
 
 #define COM1_PORT 0x3F8
 
 #define GDT_KERNEL_CODE 0x08
 #define GDT_KERNEL_DATA 0x10
-#define GDT_USER_CODE   0x18
-#define GDT_USER_DATA   0x20
-#define GDT_TSS         0x28
+#define GDT_USER_COMPAT_CODE 0x18
+#define GDT_USER_DATA        0x20
+#define GDT_USER_CODE        0x28
+#define GDT_TSS              0x30
 
 #define USER_STACK_SIZE 8192
 __attribute__((aligned(16)))
@@ -240,7 +243,7 @@ void kernel_main(BOOT_INFO *boot_info) {
 
     serial_write_string("[OS] Initializing paging...\n");
     init_paging(boot_info->FrameBufferBase, boot_info->FrameBufferSize);
-    
+
     serial_write_string("[OS] Initializing memory manager...\n");
     memory_init();
 
@@ -250,14 +253,21 @@ void kernel_main(BOOT_INFO *boot_info) {
     serial_write_string("[OS] Initializing GDT...\n");
     init_gdt();
 
-    serial_write_string("[OS] Initializing VirtIO...\n");
-    virtio_init_gpu();
+    serial_write_string("[OS] Initializing display...\n");
+    if (!display_init()) {
+        serial_write_string("[OS] [WARN] Display init failed\n");
+    }
     
     serial_write_string("[OS] Initializing syscall...\n");
     syscall_init(); 
 
+    serial_write_string("[OS] Initializing process manager...\n");
+    process_manager_init();
+
     serial_write_string("[OS] Initializing file system...\n");
     all_fs_initialize();
+
+    syscall_file_init();
 
     serial_write_string("[OS] Loading userland ELF...\n");
     if (!load_userland_elf(&user_entry)) {
@@ -270,6 +280,13 @@ void kernel_main(BOOT_INFO *boot_info) {
     
     serial_write_string("[OS] ===== Kernel Init Complete =====\n");
     serial_write_string("[OS] Transferring control to userland...\n\n");
+
+    if (process_register_boot_process(user_entry, (uint64_t)user_stack + USER_STACK_SIZE) < 0) {
+        serial_write_string("[OS] [ERROR] Failed to register boot process\n");
+        while (1) {
+            __asm__("hlt");
+        }
+    }
     
     entry_user_mode();
     __builtin_unreachable();

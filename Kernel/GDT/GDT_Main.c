@@ -5,8 +5,9 @@ static struct {
     struct GDTEntry  null;
     struct GDTEntry  kernel_code;
     struct GDTEntry  kernel_data;
-    struct GDTEntry  user_code;
+    struct GDTEntry  user_compat_code;
     struct GDTEntry  user_data;
+    struct GDTEntry  user_code;
     struct GDTEntry64 tss;
 } __attribute__((packed)) gdt;
 
@@ -32,8 +33,9 @@ void init_gdt(void) {
     gdt.kernel_code = make_gdt_entry(0xFFFFF, 0x9A, 0xA0);
     gdt.kernel_data = make_gdt_entry(0xFFFFF, 0x92, 0x80);
 
-    gdt.user_code = make_gdt_entry(0xFFFFF, 0xFA, 0xA0);
+    gdt.user_compat_code = make_gdt_entry(0xFFFFF, 0xFA, 0xC0);
     gdt.user_data = make_gdt_entry(0xFFFFF, 0xF2, 0x80);
+    gdt.user_code = make_gdt_entry(0xFFFFF, 0xFA, 0xA0);
 
     uint64_t tss_base = (uint64_t)&tss;
     uint32_t tss_limit = sizeof(struct TSS) - 1;

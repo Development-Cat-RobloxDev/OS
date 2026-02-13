@@ -3,9 +3,10 @@
 
 #define GDT_KERNEL_CODE 0x08
 #define GDT_KERNEL_DATA 0x10
-#define GDT_USER_CODE   0x18
-#define GDT_USER_DATA   0x20
-#define GDT_TSS         0x28
+#define GDT_USER_COMPAT_CODE 0x18
+#define GDT_USER_DATA        0x20
+#define GDT_USER_CODE        0x28
+#define GDT_TSS              0x30
 
 struct __attribute__((packed)) GDTEntry {
     uint16_t limit_low;
