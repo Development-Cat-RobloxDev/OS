@@ -1,4 +1,4 @@
-# OS Repo
+# ImplusOS Repo
 
 # Overview
 This repo is my homemade OS tree.
