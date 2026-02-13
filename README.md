@@ -3,7 +3,7 @@
 # Overview
 This repo is my homemade OS tree.
 
-<img width="1920" height="1080" alt="ImplusOS" src="https://github.com/moon-coffee/ImplusOS.git/main/Docs/Image/ImplusOS.png" />
+<img width="960" height="540" alt="ImplusOS" src="https://github.com/moon-coffee/ImplusOS/blob/7d2ea7a94544d773c83d8c35323cbd7ac8e2e37d/Docs/Image/ImplusOS.png" />
 
 # How to make?
 1, Install chaintools
