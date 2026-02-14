@@ -66,7 +66,6 @@ KERNEL_ASM_SRCS := \
 
 USERLAND_C_SRC := \
 	Userland/Userland.c \
-	Userland/Application/PNG_Decoder/PNG_Decoder.c
 
 KERNEL_OBJS := $(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) $(KERNEL_ASM_SRCS:%.asm=$(BUILD_DIR)/%.o)
 USERLAND_OBJS := $(USERLAND_C_SRC:%.c=$(BUILD_DIR)/%.o)

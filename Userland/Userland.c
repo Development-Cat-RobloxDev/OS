@@ -140,37 +140,72 @@ static void process_exit(void)
     }
 }
 
-#include "Application/PNG_Decoder/PNG_Decoder.h"
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+} ImageSize;
 
-static void draw_png(const PNGImage *img, uint32_t x0, uint32_t y0) {
-    for (uint32_t y=0; y<img->height; y++) {
-        for (uint32_t x=0; x<img->width; x++) {
-            uint32_t idx = (y*img->width + x) * 4;
-            uint32_t color =
-                (img->pixels[idx+0] << 24) |
-                (img->pixels[idx+1] << 16) |
-                (img->pixels[idx+2] << 8)  |
-                (img->pixels[idx+3]);
-            draw_fill_rect(x0+x, y0+y, 1, 1, color);
+uint32_t* load_png(const char* path, ImageSize* out_size) {
+    int32_t fd = file_open(path, 0);
+    if (fd < 0) {
+        serial_write_string("[U] Failed to open PNG file\n");
+        out_size->width = out_size->height = 0;
+        return NULL;
+    }
+
+    uint8_t* file_buffer = kmalloc(1024 * 1024);
+    if (!file_buffer) {
+        serial_write_string("[U] Failed to allocate memory for PNG\n");
+        file_close(fd);
+        out_size->width = out_size->height = 0;
+        return NULL;
+    }
+
+    uint64_t offset = 0;
+    int64_t read_bytes = 0;
+    while ((read_bytes = file_read(fd, file_buffer + offset, 256)) > 0) {
+        offset += (uint64_t)read_bytes;
+        if (offset >= 1024 * 1024) {
+            serial_write_string("[U] PNG too large\n");
+            break;
         }
     }
-    draw_present();
+    file_close(fd);
+
+    uint32_t width = 0, height = 0;
+    uint32_t* rgba = png_decode_buffer(file_buffer, offset, &width, &height);
+    kfree(file_buffer);
+
+    if (!rgba || width == 0 || height == 0) {
+        serial_write_string("[U] Failed to decode PNG\n");
+        out_size->width = out_size->height = 0;
+        return NULL;
+    }
+
+    out_size->width = width;
+    out_size->height = height;
+    return rgba;
 }
 
-void _start(void)
-{
+void _start(void) {
     serial_write_string("[U] userland start\n");
 
-    PNGImage img;
-    if (png_load("LOGO    PNG", &img) == 0) {
-        draw_png(&img, 50, 50);
-        png_free(&img);
-    } else {
-        serial_write_string("[U] failed to load PNG\n");
+    draw_fill_rect(50, 50, 100, 250, 0xFFFFFFFF);
+    draw_present();
+
+    ImageSize img;
+    uint32_t* rgba = load_png("LOGO.PNG", &img);
+    if (rgba) {
+        for (uint32_t y = 0; y < img.height; y++) {
+            for (uint32_t x = 0; x < img.width; x++) {
+                draw_fill_rect(x, y, 1, 1, rgba[y * img.width + x]);
+            }
+        }
+        draw_present();
+        kfree(rgba);
     }
 
-    while (1) {
-        //serial_write_string("[U] main process\n");
-        process_yield();
-    }
+    
+
+    while(1) process_yield();
 }
