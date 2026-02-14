@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "../Kernel/Memory/Other_Utils.h"
 
 #define SYSCALL_SERIAL_PUTCHAR  1ULL
 #define SYSCALL_SERIAL_PUTS     2ULL
@@ -13,6 +14,8 @@
 #define SYSCALL_FILE_READ       21ULL
 #define SYSCALL_FILE_WRITE      22ULL
 #define SYSCALL_FILE_CLOSE      23ULL
+#define SYSCALL_USER_KMALLOC    24ULL
+#define SYSCALL_USER_KFREE      25ULL
 
 static inline uint64_t syscall0(uint64_t num)
 {
@@ -101,24 +104,32 @@ static void draw_present(void)
     (void)syscall0(SYSCALL_DRAW_PRESENT);
 }
 
-static __attribute__((unused)) int32_t file_open(const char *path, uint64_t flags)
+__attribute__((unused)) int32_t file_open(const char *path, uint64_t flags)
 {
     return (int32_t)syscall2(SYSCALL_FILE_OPEN, (uint64_t)path, flags);
 }
 
-static __attribute__((unused)) int64_t file_read(int32_t fd, void *buffer, uint64_t len)
+__attribute__((unused)) int64_t file_read(int32_t fd, void *buffer, uint64_t len)
 {
     return (int64_t)syscall3(SYSCALL_FILE_READ, (uint64_t)fd, (uint64_t)buffer, len);
 }
 
-static __attribute__((unused)) int64_t file_write(int32_t fd, const void *buffer, uint64_t len)
+__attribute__((unused)) int64_t file_write(int32_t fd, const void *buffer, uint64_t len)
 {
     return (int64_t)syscall3(SYSCALL_FILE_WRITE, (uint64_t)fd, (uint64_t)buffer, len);
 }
 
-static __attribute__((unused)) int32_t file_close(int32_t fd)
+__attribute__((unused)) int32_t file_close(int32_t fd)
 {
     return (int32_t)syscall1(SYSCALL_FILE_CLOSE, (uint64_t)fd);
+}
+
+void* kmalloc(uint32_t size) {
+    return (void*)syscall1(SYSCALL_USER_KMALLOC, size);
+}
+
+void kfree(void* ptr) {
+    (void)syscall1(SYSCALL_USER_KFREE, (uint64_t)ptr);
 }
 
 __attribute__((noreturn))
@@ -129,14 +140,37 @@ static void process_exit(void)
     }
 }
 
-__attribute__((noreturn))
+#include "Application/PNG_Decoder/PNG_Decoder.h"
+
+static void draw_png(const PNGImage *img, uint32_t x0, uint32_t y0) {
+    for (uint32_t y=0; y<img->height; y++) {
+        for (uint32_t x=0; x<img->width; x++) {
+            uint32_t idx = (y*img->width + x) * 4;
+            uint32_t color =
+                (img->pixels[idx+0] << 24) |
+                (img->pixels[idx+1] << 16) |
+                (img->pixels[idx+2] << 8)  |
+                (img->pixels[idx+3]);
+            draw_fill_rect(x0+x, y0+y, 1, 1, color);
+        }
+    }
+    draw_present();
+}
+
 void _start(void)
 {
     serial_write_string("[U] userland start\n");
-    draw_fill_rect(50, 50, 100, 250, 0xFFFFFFFF);
-    draw_present();
+
+    PNGImage img;
+    if (png_load("LOGO    PNG", &img) == 0) {
+        draw_png(&img, 50, 50);
+        png_free(&img);
+    } else {
+        serial_write_string("[U] failed to load PNG\n");
+    }
+
     while (1) {
-        serial_write_string("[U] main process\n");
+        //serial_write_string("[U] main process\n");
         process_yield();
     }
 }

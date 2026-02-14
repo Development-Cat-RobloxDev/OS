@@ -14,6 +14,8 @@
 #define SYSCALL_FILE_READ       21
 #define SYSCALL_FILE_WRITE      22
 #define SYSCALL_FILE_CLOSE      23
+#define SYSCALL_USER_KMALLOC    24
+#define SYSCALL_USER_KFREE      25
 
 #define SYSCALL_FRAME_RAX 0
 #define SYSCALL_FRAME_RDX 1

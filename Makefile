@@ -56,7 +56,7 @@ KERNEL_C_SRCS := \
 	Kernel/ProcessManager/ProcessManager_Create.c \
 	Kernel/Syscall/Syscall_Init.c \
 	Kernel/Syscall/Syscall_File.c \
-	Kernel/Syscall/Syscall_Dispatch.c \
+	Kernel/Syscall/Syscall_Dispatch.c
 
 KERNEL_ASM_SRCS := \
 	Kernel/Paging/Paging.asm \
@@ -64,14 +64,12 @@ KERNEL_ASM_SRCS := \
 	Kernel/IDT/IDT.asm \
 	Kernel/Syscall/Syscall_Entry.asm
 
-USERLAND_C_SRC := Userland/Userland.c
+USERLAND_C_SRC := \
+	Userland/Userland.c \
+	Userland/Application/PNG_Decoder/PNG_Decoder.c
 
-KERNEL_OBJS := \
-	$(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) \
-	$(KERNEL_ASM_SRCS:%.asm=$(BUILD_DIR)/%.o)
-
-LOADER_OBJ := $(BUILD_DIR)/Loader/Loader.o
-USERLAND_OBJ := $(BUILD_DIR)/Userland/Userland.o
+KERNEL_OBJS := $(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) $(KERNEL_ASM_SRCS:%.asm=$(BUILD_DIR)/%.o)
+USERLAND_OBJS := $(USERLAND_C_SRC:%.c=$(BUILD_DIR)/%.o)
 
 all: $(BOOTX64_EFI) $(KERNEL_ELF) $(USERLAND_ELF)
 
@@ -79,7 +77,7 @@ $(BUILD_DIR)/Loader/Loader.o: BootLoader/Loader.c
 	mkdir -p $(dir $@)
 	$(CC) $(LOADER_CFLAGS) -c $< -o $@
 
-$(BOOTX64_EFI): $(LOADER_OBJ)
+$(BOOTX64_EFI): $(BUILD_DIR)/Loader/Loader.o
 	mkdir -p $(dir $@)
 	$(LD) -nostdlib -znocombreloc \
 		-T /usr/lib/elf_x86_64_efi.lds \
@@ -89,13 +87,9 @@ $(BOOTX64_EFI): $(LOADER_OBJ)
 		/usr/lib/libefi.a \
 		/usr/lib/libgnuefi.a \
 		-o $@.so
-
-	objcopy \
-		-j .text -j .sdata -j .data -j .dynamic \
+	objcopy -j .text -j .sdata -j .data -j .dynamic \
 		-j .dynsym -j .rel -j .rela -j .reloc \
-		--target=efi-app-x86_64 \
-		$@.so $@
-
+		--target=efi-app-x86_64 $@.so $@
 	rm -f $@.so
 
 $(BUILD_DIR)/%.o: %.c
@@ -110,35 +104,28 @@ $(KERNEL_ELF): $(KERNEL_OBJS)
 	mkdir -p $(dir $@)
 	$(LD) $(KERNEL_LDFLAGS) $^ -o $@
 
-$(USERLAND_OBJ): $(USERLAND_C_SRC)
+$(BUILD_DIR)/Userland/%.o: Userland/%.c
 	mkdir -p $(dir $@)
 	$(CC) $(USERLAND_CFLAGS) -c $< -o $@
 
-$(USERLAND_ELF): $(USERLAND_OBJ)
+$(USERLAND_ELF): $(USERLAND_OBJS)
 	mkdir -p $(dir $@)
-	$(LD) $(USERLAND_LDFLAGS) $< -o $@
+	$(LD) $(USERLAND_LDFLAGS) $^ -o $@
 
 image: all
 	mkdir -p $(IMAGE_DIR)
 	dd if=/dev/zero of=$(IMAGE) bs=1M count=128
-	parted $(IMAGE) --script \
-		mklabel gpt \
-		mkpart ESP fat32 1MiB 100% \
-		set 1 esp on
-
+	parted $(IMAGE) --script mklabel gpt mkpart ESP fat32 1MiB 100% set 1 esp on
 	sudo losetup -Pf --show $(IMAGE) | while read LOOP; do \
 		sudo mkfs.fat -F32 $${LOOP}p1; \
 		sudo mount $${LOOP}p1 /mnt; \
-		\
 		sudo mkdir -p /mnt/EFI/BOOT; \
 		sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
-		\
 		sudo mkdir -p /mnt/Kernel; \
 		sudo cp $(KERNEL_ELF) /mnt/Kernel/Kernel_Main.ELF; \
-		\
 		sudo cp $(USERLAND_ELF) /mnt/URLD.ELF; \
-		\
 		sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
+		sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
 		sync; \
 		sudo umount /mnt; \
 		sudo losetup -d $$LOOP; \
@@ -150,44 +137,29 @@ ESP_IMG  := $(IMAGE_DIR)/esp.iso
 image_esp: all
 	mkdir -p $(ISO_ROOT)/EFI/BOOT
 	mkdir -p $(ISO_ROOT)/Kernel
-
 	cp $(BOOTX64_EFI) $(ISO_ROOT)/EFI/BOOT/BOOTX64.EFI
 	cp $(KERNEL_ELF)  $(ISO_ROOT)/Kernel/Kernel_Main.ELF
 	cp $(USERLAND_ELF) $(ISO_ROOT)/URLD.ELF
 	cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT
-
+	cp Userland/LOGO.PNG $(ISO_ROOT)/LOGO.PNG; \
 	dd if=/dev/zero of=$(ESP_IMG) bs=1M count=64
 	mkfs.fat -F32 $(ESP_IMG)
-
 	mkdir -p /tmp/esp_mount
 	sudo mount $(ESP_IMG) /tmp/esp_mount
 	sudo mkdir -p /tmp/esp_mount/EFI/BOOT
 	sudo cp $(BOOTX64_EFI) /tmp/esp_mount/EFI/BOOT/BOOTX64.EFI
 	sync
 	sudo umount /tmp/esp_mount
-
 	cp $(ESP_IMG) $(ISO_ROOT)/esp.iso
-
-	xorriso -as mkisofs \
-		-R -J \
-		-V "MY_OS" \
-		-o $(IMAGE) \
-		-eltorito-alt-boot \
-		-e esp.iso \
-		-no-emul-boot \
-		$(ISO_ROOT)
+	xorriso -as mkisofs -R -J -V "MY_OS" -o $(IMAGE) -eltorito-alt-boot -e esp.iso -no-emul-boot $(ISO_ROOT)
 
 run: image
-	qemu-system-x86_64 \
-		-m 512M \
-		-vga none \
-		-device virtio-vga \
+	qemu-system-x86_64 -m 512M -vga none -device virtio-vga \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive format=raw,file=$(IMAGE) \
-		-serial stdio
+		-drive format=raw,file=$(IMAGE) -serial stdio
 
 clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
 
 -include $(KERNEL_OBJS:.o=.d)
--include $(USERLAND_OBJ:.o=.d)
+-include $(USERLAND_OBJS:.o=.d)

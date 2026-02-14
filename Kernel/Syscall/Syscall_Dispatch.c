@@ -4,6 +4,7 @@
 #include "../Serial.h"
 #include "../ProcessManager/ProcessManager.h"
 #include "../Drivers/Display/Display_Main.h"
+#include "../Memory/Memory_Main.h"
 #include <stdint.h>
 
 static void set_syscall_result(uint64_t saved_rsp, uint64_t value)
@@ -98,6 +99,18 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
         int32_t rc = syscall_file_close((int32_t)arg1);
         set_syscall_result(saved_rsp, (uint64_t)(int64_t)rc);
         break;
+    }
+
+    case SYSCALL_USER_KMALLOC: {
+        uint32_t size = (uint32_t)arg1;
+        void *ptr = kmalloc(size);
+        return (uint64_t)ptr;
+    }
+
+    case SYSCALL_USER_KFREE: {
+        void *ptr = (void*)arg1;
+        kfree(ptr);
+        return 0;
     }
 
     default:
