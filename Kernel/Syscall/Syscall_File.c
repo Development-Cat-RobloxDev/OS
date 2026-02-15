@@ -18,68 +18,18 @@ typedef struct {
 
 static kernel_file_t g_files[FILE_MAX_FD];
 
-static char to_upper_ascii(char c) {
-    if (c >= 'a' && c <= 'z') {
-        return (char)(c - ('a' - 'A'));
-    }
-    return c;
-}
-
-static bool path_to_fat83(const char *path, char out_name[12]) {
-    if (!path || !out_name) {
-        return false;
-    }
-
-    for (int i = 0; i < 11; ++i) {
-        out_name[i] = ' ';
-    }
-    out_name[11] = '\0';
-
-    int name_len = 0;
-    int ext_len = 0;
-    int in_ext = 0;
-
-    for (const char *p = path; *p; ++p) {
-        char c = *p;
-        if (c == '.') {
-            if (in_ext) {
-                return false;
-            }
-            in_ext = 1;
-            continue;
-        }
-
-        c = to_upper_ascii(c);
-
-        if (!in_ext) {
-            if (name_len >= 8) {
-                return false;
-            }
-            out_name[name_len++] = c;
-        } else {
-            if (ext_len >= 3) {
-                return false;
-            }
-            out_name[8 + ext_len++] = c;
-        }
-    }
-
-    return name_len > 0;
-}
-
 void syscall_file_init(void) {
     memset(g_files, 0, sizeof(g_files));
 }
 
 int32_t syscall_file_open(const char *path, uint64_t flags) {
-    char fat_name[12];
     FAT32_FILE file;
 
-    if (!path_to_fat83(path, fat_name)) {
+    if (!path || path[0] == '\0') {
         return -1;
     }
 
-    if (!fat32_find_file(fat_name, &file)) {
+    if (!fat32_find_file(path, &file)) {
         return -1;
     }
 

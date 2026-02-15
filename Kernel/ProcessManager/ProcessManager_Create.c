@@ -1,4 +1,5 @@
 #include "ProcessManager.h"
+#include "../ELF/ELF_Loader.h"
 #include "../Memory/Memory_Main.h"
 #include "../Serial.h"
 #include "../Syscall/Syscall_Main.h"
@@ -12,6 +13,9 @@
 #define PROCESS_STATE_RUNNING 2
 #define PROCESS_STATE_DEAD 3
 #define PROCESS_CONTEXT_QWORDS SYSCALL_FRAME_QWORDS
+#define PROCESS_ELF_MAX_SIZE (2ULL * 1024ULL * 1024ULL)
+#define PROCESS_ELF_VADDR_MIN 0x00400000ULL
+#define PROCESS_ELF_VADDR_MAX 0x08000000ULL
 
 typedef struct {
     uint8_t state;
@@ -126,6 +130,28 @@ int32_t process_create_user(uint64_t entry) {
     g_processes[pid].stack_base = stack;
 
     return pid;
+}
+
+int32_t process_spawn_user_elf(const char *path) {
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+    elf_load_policy_t policy = {
+        .max_file_size = PROCESS_ELF_MAX_SIZE,
+        .min_vaddr = PROCESS_ELF_VADDR_MIN,
+        .max_vaddr = PROCESS_ELF_VADDR_MAX,
+    };
+    uint64_t entry = 0;
+
+    if (!elf_loader_load_from_path(path, &policy, &entry)) {
+        serial_write_string("[OS] [PROC] Failed to load process ELF: ");
+        serial_write_string(path);
+        serial_write_string("\n");
+        return -1;
+    }
+
+    return process_create_user(entry);
 }
 
 void process_exit_current(void) {

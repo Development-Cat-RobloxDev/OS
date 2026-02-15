@@ -17,9 +17,10 @@ typedef struct {
 } FAT32_BPB;
 
 typedef struct {
-    char name[12];
+    char name[260];
     uint32_t first_cluster;
     uint32_t size;
+    uint8_t attributes;
 } FAT32_FILE;
 
 bool fat32_init(void);

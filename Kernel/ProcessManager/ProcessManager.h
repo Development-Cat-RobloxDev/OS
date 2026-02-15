@@ -5,6 +5,7 @@
 void process_manager_init(void);
 int32_t process_register_boot_process(uint64_t entry, uint64_t user_stack_top);
 int32_t process_create_user(uint64_t entry);
+int32_t process_spawn_user_elf(const char *path);
 void process_exit_current(void);
 uint64_t process_schedule_on_syscall(uint64_t current_saved_rsp,
                                      uint64_t current_user_rsp,

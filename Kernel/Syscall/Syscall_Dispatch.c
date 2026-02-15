@@ -40,6 +40,12 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
         break;
     }
 
+    case SYSCALL_PROCESS_SPAWN_ELF: {
+        int32_t pid = process_spawn_user_elf((const char *)arg1);
+        set_syscall_result(saved_rsp, (uint64_t)(int64_t)pid);
+        break;
+    }
+
     case SYSCALL_PROCESS_YIELD:
         set_syscall_result(saved_rsp, 0);
         request_switch = 1;
@@ -105,13 +111,15 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
     case SYSCALL_USER_KMALLOC: {
         uint32_t size = (uint32_t)arg1;
         void *ptr = kmalloc(size);
-        return (uint64_t)ptr;
+        set_syscall_result(saved_rsp, (uint64_t)ptr);
+        break;
     }
 
     case SYSCALL_USER_KFREE: {
         void *ptr = (void*)arg1;
         kfree(ptr);
-        return 0;
+        set_syscall_result(saved_rsp, 0);
+        break;
     }
 
         case SYSCALL_USER_MEMCPY: {

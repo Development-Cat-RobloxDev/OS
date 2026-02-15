@@ -17,7 +17,10 @@ USERLAND_DIR := Userland
 
 KERNEL_ELF  := $(BUILD_DIR)/Kernel/Kernel_Main.ELF
 BOOTX64_EFI := $(BUILD_DIR)/Loader/BOOTX64.EFI
-USERLAND_ELF := $(BUILD_DIR)/Userland/Userland.ELF
+USERLAND_INIT_ELF := $(BUILD_DIR)/Userland/Userland.ELF
+USERLAND_APP_ELF  := $(BUILD_DIR)/Userland/UAPP.ELF
+VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Drivers/VirtIO_Driver.ELF
+INTEL_DRIVER_ELF  := $(BUILD_DIR)/Drivers/Intel_UHD_Graphics_9TH_Driver.ELF
 
 KERNEL_CFLAGS := \
 	-IKernel -IThirdParty \
@@ -36,6 +39,7 @@ LOADER_CFLAGS := \
 	-Wall -Wextra -DEFI_FUNCTION_WRAPPER
 
 USERLAND_LDFLAGS := -T Userland/Userland.ld -nostdlib --build-id=none
+USERLAND_APP_LDFLAGS := -T Userland/UserApp.ld -nostdlib --build-id=none
 USERLAND_CFLAGS := \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
 	-mno-red-zone -nostdlib -nostartfiles -nodefaultlibs \
@@ -47,6 +51,10 @@ USERLAND_CXXFLAGS := \
 	-fno-exceptions -fno-rtti \
 	-Wall -Wextra -MMD -MP
 
+DRIVER_MODULE_CFLAGS := $(KERNEL_CFLAGS) -DIMPLUS_DRIVER_MODULE
+VIRTIO_DRIVER_LDFLAGS := -T Kernel/Drivers/Display/VirtIO/VirtIO_Module.ld -nostdlib --build-id=none
+INTEL_DRIVER_LDFLAGS := -T Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Module.ld -nostdlib --build-id=none
+
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
 	Kernel/Memory/Memory_Main.c \
@@ -56,9 +64,10 @@ KERNEL_C_SRCS := \
 	Kernel/IDT/IDT_Main.c \
 	Kernel/IO/IO_Main.c \
 	Kernel/GDT/GDT_Main.c \
+	Kernel/ELF/ELF_Loader.c \
 	Kernel/Drivers/FileSystem/FAT32/FAT32_Main.c \
+	Kernel/Drivers/DriverSelect.c \
 	Kernel/Drivers/Display/Display_Main.c \
-	Kernel/Drivers/Display/VirtIO/VirtIO.c \
 	Kernel/Drivers/PCI/PCI_Main.c \
 	Kernel/ProcessManager/ProcessManager_Create.c \
 	Kernel/Syscall/Syscall_Init.c \
@@ -73,12 +82,21 @@ KERNEL_ASM_SRCS := \
 
 USERLAND_C_SRCS := \
 	Userland/Userland.c \
-	Userland/Application/PNG_Decoder/PNG_Decoder.c
+	Userland/Syscalls.c
+
+USERLAND_APP_C_SRCS := \
+	Userland/Application/SystemApps/UApp_Main.c \
+	Userland/Application/PNG_Decoder/PNG_Decoder.c \
+	Userland/Syscalls.c
 
 KERNEL_OBJS := $(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) $(KERNEL_ASM_SRCS:%.asm=$(BUILD_DIR)/%.o)
-USERLAND_OBJS := $(USERLAND_C_SRCS:%.c=$(BUILD_DIR)/%.o)
+USERLAND_INIT_OBJS := $(USERLAND_C_SRCS:%.c=$(BUILD_DIR)/%.o)
+USERLAND_APP_OBJS := $(USERLAND_APP_C_SRCS:%.c=$(BUILD_DIR)/%.o)
+DRIVER_MODULE_OBJS := \
+	$(BUILD_DIR)/Modules/VirtIO_Module.o \
+	$(BUILD_DIR)/Modules/Intel_Module.o
 
-all: $(BOOTX64_EFI) $(KERNEL_ELF) $(USERLAND_ELF)
+all: $(BOOTX64_EFI) $(KERNEL_ELF) $(USERLAND_INIT_ELF) $(USERLAND_APP_ELF) $(VIRTIO_DRIVER_ELF) $(INTEL_DRIVER_ELF)
 
 $(BUILD_DIR)/Loader/Loader.o: BootLoader/Loader.c
 	mkdir -p $(dir $@)
@@ -119,9 +137,29 @@ $(BUILD_DIR)/Userland/%.o: Userland/%.cpp
 	mkdir -p $(dir $@)
 	$(CXX) $(USERLAND_CXXFLAGS) -c $< -o $@
 
-$(USERLAND_ELF): $(USERLAND_OBJS)
+$(USERLAND_INIT_ELF): $(USERLAND_INIT_OBJS)
 	mkdir -p $(dir $@)
 	$(LD) $(USERLAND_LDFLAGS) $^ -o $@
+
+$(USERLAND_APP_ELF): $(USERLAND_APP_OBJS)
+	mkdir -p $(dir $@)
+	$(LD) $(USERLAND_APP_LDFLAGS) $^ -o $@
+
+$(BUILD_DIR)/Modules/VirtIO_Module.o: Kernel/Drivers/Display/VirtIO/VirtIO.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/Modules/Intel_Module.o: Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Graphics_9TH.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
+$(VIRTIO_DRIVER_ELF): $(BUILD_DIR)/Modules/VirtIO_Module.o
+	mkdir -p $(dir $@)
+	$(LD) $(VIRTIO_DRIVER_LDFLAGS) $^ -o $@
+
+$(INTEL_DRIVER_ELF): $(BUILD_DIR)/Modules/Intel_Module.o
+	mkdir -p $(dir $@)
+	$(LD) $(INTEL_DRIVER_LDFLAGS) $^ -o $@
 
 image: all
 	mkdir -p $(IMAGE_DIR)
@@ -129,17 +167,21 @@ image: all
 	parted $(IMAGE) --script mklabel gpt mkpart ESP fat32 1MiB 100% set 1 esp on
 	sudo losetup -Pf --show $(IMAGE) | while read LOOP; do \
 		sudo mkfs.fat -F32 $${LOOP}p1; \
-		sudo mount $${LOOP}p1 /mnt; \
-		sudo mkdir -p /mnt/EFI/BOOT; \
-		sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
-		sudo mkdir -p /mnt/Kernel; \
-		sudo cp $(KERNEL_ELF) /mnt/Kernel/Kernel_Main.ELF; \
-		sudo cp $(USERLAND_ELF) /mnt/URLD.ELF; \
-		sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
-		sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
-		sync; \
-		sudo umount /mnt; \
-		sudo losetup -d $$LOOP; \
+	sudo mount $${LOOP}p1 /mnt; \
+	sudo mkdir -p /mnt/EFI/BOOT; \
+	sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
+	sudo mkdir -p /mnt/Kernel; \
+	sudo cp $(KERNEL_ELF) /mnt/Kernel/Kernel_Main.ELF; \
+	sudo cp $(USERLAND_INIT_ELF) /mnt/URLD.ELF; \
+	sudo cp $(USERLAND_APP_ELF) /mnt/UAPP.ELF; \
+	sudo mkdir -p /mnt/Kernel/Driver; \
+	sudo cp $(VIRTIO_DRIVER_ELF) /mnt/Kernel/Driver/; \
+	sudo cp $(INTEL_DRIVER_ELF) /mnt/Kernel/Driver/; \
+	sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
+	sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
+	sync; \
+	sudo umount /mnt; \
+	sudo losetup -d $$LOOP; \
 	done
 
 ISO_ROOT := $(IMAGE_DIR)/iso_root
@@ -148,9 +190,13 @@ ESP_IMG  := $(IMAGE_DIR)/esp.iso
 image_esp: all
 	mkdir -p $(ISO_ROOT)/EFI/BOOT
 	mkdir -p $(ISO_ROOT)/Kernel
+	mkdir -p $(ISO_ROOT)/Kernel/Driver
 	cp $(BOOTX64_EFI) $(ISO_ROOT)/EFI/BOOT/BOOTX64.EFI
 	cp $(KERNEL_ELF)  $(ISO_ROOT)/Kernel/Kernel_Main.ELF
-	cp $(USERLAND_ELF) $(ISO_ROOT)/URLD.ELF
+	cp $(USERLAND_INIT_ELF) $(ISO_ROOT)/URLD.ELF
+	cp $(USERLAND_APP_ELF) $(ISO_ROOT)/UAPP.ELF
+	cp $(VIRTIO_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
+	cp $(INTEL_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
 	cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT
 	cp Userland/LOGO.PNG $(ISO_ROOT)/LOGO.PNG; \
 	dd if=/dev/zero of=$(ESP_IMG) bs=1M count=64
@@ -173,4 +219,6 @@ clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
 
 -include $(KERNEL_OBJS:.o=.d)
--include $(USERLAND_OBJS:.o=.d)
+-include $(USERLAND_INIT_OBJS:.o=.d)
+-include $(USERLAND_APP_OBJS:.o=.d)
+-include $(DRIVER_MODULE_OBJS:.o=.d)

@@ -1,24 +1,10 @@
 #include <stdint.h>
-#include "../Kernel/Memory/Other_Utils.h"
-#include "Application/PNG_Decoder/PNG_Decoder.h"
 
-#define SYSCALL_SERIAL_PUTCHAR  1ULL
-#define SYSCALL_SERIAL_PUTS     2ULL
-#define SYSCALL_PROCESS_CREATE  3ULL
-#define SYSCALL_PROCESS_YIELD   4ULL
-#define SYSCALL_PROCESS_EXIT    5ULL
-#define SYSCALL_THREAD_CREATE   6ULL
-#define SYSCALL_DRAW_PIXEL      10ULL
-#define SYSCALL_DRAW_FILL_RECT  11ULL
-#define SYSCALL_DRAW_PRESENT    12ULL
-#define SYSCALL_FILE_OPEN       20ULL
-#define SYSCALL_FILE_READ       21ULL
-#define SYSCALL_FILE_WRITE      22ULL
-#define SYSCALL_FILE_CLOSE      23ULL
-#define SYSCALL_USER_KMALLOC    24ULL
-#define SYSCALL_USER_KFREE      25ULL
-#define SYSCALL_USER_MEMCPY     26ULL
-#define SYSCALL_USER_MEMCMP     27ULL
+#define SYSCALL_SERIAL_PUTCHAR     1ULL
+#define SYSCALL_SERIAL_PUTS        2ULL
+#define SYSCALL_PROCESS_YIELD      4ULL
+#define SYSCALL_PROCESS_EXIT       5ULL
+#define SYSCALL_PROCESS_SPAWN_ELF  7ULL
 
 static inline uint64_t syscall0(uint64_t num)
 {
@@ -44,109 +30,48 @@ static inline uint64_t syscall1(uint64_t num, uint64_t arg1)
     return ret;
 }
 
-static inline uint64_t syscall2(uint64_t num, uint64_t arg1, uint64_t arg2)
-{
-    uint64_t ret;
-    __asm__ volatile (
-        "syscall"
-        : "=a"(ret)
-        : "a"(num), "D"(arg1), "S"(arg2)
-        : "rcx", "r11", "memory"
-    );
-    return ret;
-}
-
-static inline uint64_t syscall3(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3)
-{
-    uint64_t ret;
-    __asm__ volatile (
-        "syscall"
-        : "=a"(ret)
-        : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3)
-        : "rcx", "r11", "memory"
-    );
-    return ret;
-}
-
-static inline uint64_t syscall4(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
-{
-    uint64_t ret;
-    register uint64_t r10 __asm__("r10") = arg4;
-    __asm__ volatile (
-        "syscall"
-        : "=a"(ret)
-        : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3), "r"(r10)
-        : "rcx", "r11", "memory"
-    );
-    return ret;
-}
-
 static void serial_write_string(const char *str)
 {
     (void)syscall1(SYSCALL_SERIAL_PUTS, (uint64_t)str);
 }
 
-static int32_t thread_create(void (*entry)(void))
+static void serial_write_i32(int32_t value)
 {
-    return (int32_t)syscall1(SYSCALL_THREAD_CREATE, (uint64_t)entry);
+    char buf[12];
+    int idx = 0;
+    uint64_t v;
+    int64_t signed_value = (int64_t)value;
+
+    if (signed_value < 0) {
+        (void)syscall1(SYSCALL_SERIAL_PUTCHAR, (uint64_t)'-');
+        v = (uint64_t)(-signed_value);
+    } else {
+        v = (uint64_t)signed_value;
+    }
+
+    if (v == 0) {
+        (void)syscall1(SYSCALL_SERIAL_PUTCHAR, (uint64_t)'0');
+        return;
+    }
+
+    while (v > 0) {
+        buf[idx++] = (char)('0' + (v % 10u));
+        v /= 10u;
+    }
+
+    while (idx > 0) {
+        (void)syscall1(SYSCALL_SERIAL_PUTCHAR, (uint64_t)buf[--idx]);
+    }
+}
+
+static int32_t process_spawn_elf(const char *path)
+{
+    return (int32_t)syscall1(SYSCALL_PROCESS_SPAWN_ELF, (uint64_t)path);
 }
 
 static void process_yield(void)
 {
     (void)syscall0(SYSCALL_PROCESS_YIELD);
-}
-
-static void draw_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color)
-{
-    uint64_t packed_wh = ((uint64_t)w << 32) | (uint64_t)h;
-    (void)syscall4(SYSCALL_DRAW_FILL_RECT, x, y, packed_wh, color);
-}
-
-static void draw_present(void)
-{
-    (void)syscall0(SYSCALL_DRAW_PRESENT);
-}
-
-__attribute__((unused)) int32_t file_open(const char *path, uint64_t flags)
-{
-    return (int32_t)syscall2(SYSCALL_FILE_OPEN, (uint64_t)path, flags);
-}
-
-__attribute__((unused)) int64_t file_read(int32_t fd, void *buffer, uint64_t len)
-{
-    return (int64_t)syscall3(SYSCALL_FILE_READ, (uint64_t)fd, (uint64_t)buffer, len);
-}
-
-__attribute__((unused)) int64_t file_write(int32_t fd, const void *buffer, uint64_t len)
-{
-    return (int64_t)syscall3(SYSCALL_FILE_WRITE, (uint64_t)fd, (uint64_t)buffer, len);
-}
-
-__attribute__((unused)) int32_t file_close(int32_t fd)
-{
-    return (int32_t)syscall1(SYSCALL_FILE_CLOSE, (uint64_t)fd);
-}
-
-void* kmalloc(uint32_t size) {
-    return (void*)syscall1(SYSCALL_USER_KMALLOC, size);
-}
-
-void kfree(void* ptr) {
-    (void)syscall1(SYSCALL_USER_KFREE, (uint64_t)ptr);
-}
-
-void* memcpy(void* dst, const void* src, size_t n) {
-    return (void*)syscall3(SYSCALL_USER_MEMCPY,
-                           (uint64_t)dst,
-                           (uint64_t)src,
-                           (uint64_t)n);
-}
-
-int memcmp(const void *s1, const void *s2, size_t n) {
-    return (int)syscall3(SYSCALL_USER_MEMCMP,
-                         (uint64_t)s1,
-                         (uint64_t)s2,
-                         (uint64_t)n);
 }
 
 __attribute__((noreturn))
@@ -157,70 +82,22 @@ static void process_exit(void)
     }
 }
 
-typedef struct {
-    uint32_t width;
-    uint32_t height;
-} ImageSize;
+void _start(void)
+{
+    serial_write_string("[U][INIT] boot process started\n");
 
-uint32_t* load_png(const char* path, ImageSize* out_size) {
-    int32_t fd = file_open(path, 0);
-    if (fd < 0) {
-        serial_write_string("[U] Failed to open PNG file\n");
-        out_size->width = out_size->height = 0;
-        return NULL;
-    }
-
-    uint8_t* file_buffer = kmalloc(1024 * 1024);
-    if (!file_buffer) {
-        serial_write_string("[U] Failed to allocate memory for PNG\n");
-        file_close(fd);
-        out_size->width = out_size->height = 0;
-        return NULL;
-    }
-
-    uint64_t offset = 0;
-    int64_t read_bytes = 0;
-    while ((read_bytes = file_read(fd, file_buffer + offset, 256)) > 0) {
-        offset += (uint64_t)read_bytes;
-        if (offset >= 1024 * 1024) {
-            serial_write_string("[U] PNG too large\n");
-            break;
+    int32_t pid = process_spawn_elf("UAPP.ELF");
+    if (pid < 0) {
+        serial_write_string("[U][INIT] spawn failed for UAPP.ELF\n");
+        while (1) {
+            process_yield();
         }
     }
-    file_close(fd);
 
-    uint32_t width = 0, height = 0;
-    uint32_t* rgba = png_decode_buffer(file_buffer, offset, &width, &height);
-    kfree(file_buffer);
+    serial_write_string("[U][INIT] spawned UAPP.ELF pid=");
+    serial_write_i32(pid);
+    serial_write_string("\n");
+    serial_write_string("[U][INIT] exiting init process\n");
 
-    if (!rgba || width == 0 || height == 0) {
-        serial_write_string("[U] Failed to decode PNG\n");
-        out_size->width = out_size->height = 0;
-        return NULL;
-    }
-
-    out_size->width = width;
-    out_size->height = height;
-    return rgba;
-}
-
-void _start(void) {
-    serial_write_string("[U] userland start\n");
-
-    draw_fill_rect(50, 50, 100, 250, 0xFFFFFFFF);
-    draw_present();
-
-    ImageSize img;
-    uint32_t* rgba = load_png("LOGO.PNG", &img);
-    if (rgba) {
-        for (uint32_t y = 0; y < img.height; y++) {
-            for (uint32_t x = 0; x < img.width; x++) {
-                draw_fill_rect(x, y, 1, 1, rgba[y * img.width + x]);
-            }
-        }
-        draw_present();
-        kfree(rgba);
-    }
-    
-    while(1) process_yield();
+    process_exit();
 }

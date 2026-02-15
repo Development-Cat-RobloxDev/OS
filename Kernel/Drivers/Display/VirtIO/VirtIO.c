@@ -8,10 +8,16 @@
 #include "../../../Memory/Memory_Main.h"
 #include "../../../Memory/Other_Utils.h"
 #include "../../../Paging/Paging_Main.h"
+#ifdef IMPLUS_DRIVER_MODULE
+#include "../../DriverBinary.h"
+#else
+#include "../../DriverSelect.h"
+#endif
 #include "../../PCI/PCI_Main.h"
 
 #define VIRTIO_VENDOR_ID 0x1AF4
 #define VIRTIO_GPU_DEVICE_ID 0x1050
+#define VIRTIO_GPU_DEVICE_NAME "VirtIO GPU"
 
 #define PCI_CAP_ID_VENDOR 0x09
 
@@ -46,6 +52,36 @@
 #define GPU_SCANOUT_ID  0
 
 #define VIRTIO_MMIO_TIMEOUT 10000000u
+
+#ifdef IMPLUS_DRIVER_MODULE
+static const driver_kernel_api_t *g_driver_api = NULL;
+
+static void *driver_module_memset(void *dst, int value, size_t n) {
+    uint8_t *p = (uint8_t *)dst;
+    for (size_t i = 0; i < n; ++i) {
+        p[i] = (uint8_t)value;
+    }
+    return dst;
+}
+
+static int driver_module_strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        ++a;
+        ++b;
+    }
+    return (int)(unsigned char)(*a) - (int)(unsigned char)(*b);
+}
+
+#define serial_write_string g_driver_api->serial_write_string
+#define serial_write_uint32 g_driver_api->serial_write_uint32
+#define kmalloc g_driver_api->kmalloc
+#define kfree g_driver_api->kfree
+#define pci_read_config g_driver_api->pci_read_config
+#define pci_write_config g_driver_api->pci_write_config
+#define map_mmio_virt g_driver_api->map_mmio_virt
+#define memset driver_module_memset
+#define strcmp driver_module_strcmp
+#endif
 
 typedef struct {
     uint8_t bus;
@@ -250,6 +286,13 @@ static void pci_read_bar_addrs(uint8_t bus, uint8_t device, uint8_t func, uint64
     }
 }
 
+static const char *pci_device_name(uint16_t vendor_id, uint16_t device_id) {
+    if (vendor_id == VIRTIO_VENDOR_ID && device_id == VIRTIO_GPU_DEVICE_ID) {
+        return VIRTIO_GPU_DEVICE_NAME;
+    }
+    return NULL;
+}
+
 static int find_virtio_gpu(virtio_gpu_pci_t *gpu) {
     for (uint16_t bus = 0; bus < 256; bus++) {
         for (uint8_t device = 0; device < 32; device++) {
@@ -265,7 +308,8 @@ static int find_virtio_gpu(virtio_gpu_pci_t *gpu) {
                     continue;
                 }
 
-                if (vendor_id == VIRTIO_VENDOR_ID && device_id == VIRTIO_GPU_DEVICE_ID) {
+                const char *device_name = pci_device_name(vendor_id, device_id);
+                if (device_name != NULL && strcmp(device_name, VIRTIO_GPU_DEVICE_NAME) == 0) {
                     gpu->bus = (uint8_t)bus;
                     gpu->device = device;
                     gpu->func = func;
@@ -614,7 +658,7 @@ bool virtio_gpu_init(void) {
     g_gpu_fb = NULL;
 
     if (!find_virtio_gpu(&gpu)) {
-        serial_write_string("[OS] [VIRTIO] GPU device not found\n");
+        serial_write_string("[OS] [VIRTIO] PCI device \"VirtIO GPU\" not found\n");
         return false;
     }
 
@@ -732,3 +776,47 @@ void virtio_gpu_present(void) {
     }
     (void)gpu_cmd_resource_flush(&g_gpu_controlq, g_gpu_width, g_gpu_height);
 }
+
+static bool virtio_gpu_probe(void) {
+    virtio_gpu_pci_t gpu;
+    return find_virtio_gpu(&gpu) != 0;
+}
+
+static const display_driver_t g_virtio_display_driver = {
+    .name = VIRTIO_GPU_DEVICE_NAME,
+    .probe = virtio_gpu_probe,
+    .init = virtio_gpu_init,
+    .is_ready = virtio_gpu_is_ready,
+    .width = virtio_gpu_width,
+    .height = virtio_gpu_height,
+    .draw_pixel = virtio_gpu_draw_pixel,
+    .fill_rect = virtio_gpu_fill_rect,
+    .present = virtio_gpu_present,
+};
+
+#ifdef IMPLUS_DRIVER_MODULE
+#undef serial_write_string
+#undef serial_write_uint32
+#undef kmalloc
+#undef kfree
+#undef pci_read_config
+#undef pci_write_config
+#undef map_mmio_virt
+#undef memset
+#undef strcmp
+
+const display_driver_t *driver_module_init(const driver_kernel_api_t *api) {
+    if (!api || !api->serial_write_string || !api->serial_write_uint32 ||
+        !api->kmalloc || !api->kfree || !api->pci_read_config ||
+        !api->pci_write_config || !api->map_mmio_virt) {
+        return NULL;
+    }
+
+    g_driver_api = api;
+    return &g_virtio_display_driver;
+}
+#else
+void virtio_gpu_register_driver(void) {
+    (void)driver_select_register_display_driver(&g_virtio_display_driver);
+}
+#endif

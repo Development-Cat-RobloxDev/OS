@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 bool virtio_gpu_init(void);
+void virtio_gpu_register_driver(void);
 bool virtio_gpu_is_ready(void);
 uint32_t virtio_gpu_width(void);
 uint32_t virtio_gpu_height(void);
