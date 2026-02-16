@@ -123,12 +123,6 @@ static uint32_t* load_png(const char* path, ImageSize* out_size) {
 
 void _start(void)
 {
-    static const uint32_t colors[] = {
-        0xFF202020u,
-        0xFF204080u,
-        0xFF406020u,
-        0xFF602040u,
-    };
     uint32_t frame = 0;
 
     serial_write_string("[U][APP] standalone process started\n");
@@ -139,10 +133,7 @@ void _start(void)
     }
 
     while (1) {
-        uint32_t bg = colors[frame % (sizeof(colors) / sizeof(colors[0]))];
-        draw_fill_rect(0, 0, 640, 480, bg);
-        draw_fill_rect(80, 80, 200, 120, 0xFFFFFFFFu);
-        draw_fill_rect(100, 100, 160, 80, 0xFF101010u);
+        draw_fill_rect(0, 0, 640, 480, 0xFFFFFFF);
         draw_png_image(rgba, &img, 16, 16);
         draw_present();
 
