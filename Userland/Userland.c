@@ -86,15 +86,15 @@ void _start(void)
 {
     serial_write_string("[U][INIT] boot process started\n");
 
-    int32_t pid = process_spawn_elf("UAPP.ELF");
+    int32_t pid = process_spawn_elf("Userland/SystemApps/UserApp.ELF");
     if (pid < 0) {
-        serial_write_string("[U][INIT] spawn failed for UAPP.ELF\n");
+        serial_write_string("[U][INIT] spawn failed for UserApp.ELF\n");
         while (1) {
             process_yield();
         }
     }
 
-    serial_write_string("[U][INIT] spawned UAPP.ELF pid=");
+    serial_write_string("[U][INIT] spawned UserApp.ELF pid=");
     serial_write_i32(pid);
     serial_write_string("\n");
     serial_write_string("[U][INIT] exiting init process\n");

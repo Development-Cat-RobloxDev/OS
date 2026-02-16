@@ -18,7 +18,7 @@ USERLAND_DIR := Userland
 KERNEL_ELF  := $(BUILD_DIR)/Kernel/Kernel_Main.ELF
 BOOTX64_EFI := $(BUILD_DIR)/Loader/BOOTX64.EFI
 USERLAND_INIT_ELF := $(BUILD_DIR)/Userland/Userland.ELF
-USERLAND_APP_ELF  := $(BUILD_DIR)/Userland/UAPP.ELF
+USERLAND_APP_ELF  := $(BUILD_DIR)/Userland/SystemApps/UserApp.ELF
 VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Drivers/VirtIO_Driver.ELF
 INTEL_DRIVER_ELF  := $(BUILD_DIR)/Drivers/Intel_UHD_Graphics_9TH_Driver.ELF
 
@@ -39,7 +39,7 @@ LOADER_CFLAGS := \
 	-Wall -Wextra -DEFI_FUNCTION_WRAPPER
 
 USERLAND_LDFLAGS := -T Userland/Userland.ld -nostdlib --build-id=none
-USERLAND_APP_LDFLAGS := -T Userland/UserApp.ld -nostdlib --build-id=none
+USERLAND_APP_LDFLAGS := -T Userland/Application/SystemApps/UserApp.ld -nostdlib --build-id=none
 USERLAND_CFLAGS := \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
 	-mno-red-zone -nostdlib -nostartfiles -nodefaultlibs \
@@ -171,9 +171,11 @@ image: all
 	sudo mkdir -p /mnt/EFI/BOOT; \
 	sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
 	sudo mkdir -p /mnt/Kernel; \
+	sudo mkdir -p /mnt/Userland; \
+	sudo mkdir -p /mnt/Userland/SystemApps; \
 	sudo cp $(KERNEL_ELF) /mnt/Kernel/Kernel_Main.ELF; \
-	sudo cp $(USERLAND_INIT_ELF) /mnt/URLD.ELF; \
-	sudo cp $(USERLAND_APP_ELF) /mnt/UAPP.ELF; \
+	sudo cp $(USERLAND_INIT_ELF) /mnt/Userland/Userland.ELF; \
+	sudo cp $(USERLAND_APP_ELF) /mnt/Userland/SystemApps/UserApp.ELF; \
 	sudo mkdir -p /mnt/Kernel/Driver; \
 	sudo cp $(VIRTIO_DRIVER_ELF) /mnt/Kernel/Driver/; \
 	sudo cp $(INTEL_DRIVER_ELF) /mnt/Kernel/Driver/; \
@@ -191,10 +193,12 @@ image_esp: all
 	mkdir -p $(ISO_ROOT)/EFI/BOOT
 	mkdir -p $(ISO_ROOT)/Kernel
 	mkdir -p $(ISO_ROOT)/Kernel/Driver
+	mkdir -p $(ISO_ROOT)/Userland
+	mkdir -p $(ISO_ROOT)/Userland/SystemApps
 	cp $(BOOTX64_EFI) $(ISO_ROOT)/EFI/BOOT/BOOTX64.EFI
 	cp $(KERNEL_ELF)  $(ISO_ROOT)/Kernel/Kernel_Main.ELF
-	cp $(USERLAND_INIT_ELF) $(ISO_ROOT)/URLD.ELF
-	cp $(USERLAND_APP_ELF) $(ISO_ROOT)/UAPP.ELF
+	cp $(USERLAND_INIT_ELF) $(ISO_ROOT)/Userland/Userland.ELF
+	cp $(USERLAND_APP_ELF) $(ISO_ROOT)/Userland/SystemApps/UserApp.ELF
 	cp $(VIRTIO_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
 	cp $(INTEL_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
 	cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT

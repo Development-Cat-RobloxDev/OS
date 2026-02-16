@@ -80,7 +80,7 @@ static bool load_userland_elf(uint64_t *entry_out) {
         .min_vaddr = USER_ELF_VADDR_MIN,
         .max_vaddr = USER_ELF_VADDR_MAX,
     };
-    return elf_loader_load_from_path("URLD.ELF", &policy, entry_out);
+    return elf_loader_load_from_path("Userland/Userland.ELF", &policy, entry_out);
 }
 
 __attribute__((noreturn))
