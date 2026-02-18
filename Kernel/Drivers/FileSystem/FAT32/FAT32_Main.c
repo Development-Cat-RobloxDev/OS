@@ -335,14 +335,12 @@ static bool fat32_lookup_entry_in_directory(uint32_t dir_cluster,
 
                 const char *candidate =
                     (lfn_valid && lfn_name[0] != '\0') ? lfn_name : short_name;
-
-                // 重要な修正: 比較を先に実行
+                    
                 if (string_case_equal(candidate, target_name)) {
                     fat32_fill_file_from_entry(entry, candidate, out_file);
                     return true;
                 }
 
-                // 比較後にリセット
                 lfn_valid = 0;
                 memset(lfn_name, 0, sizeof(lfn_name));
             }
@@ -513,8 +511,7 @@ void fat32_list_root_files(void) {
                     serial_write_string("/");
                 }
                 serial_write_string("\n");
-
-                // 表示後にリセット
+                
                 lfn_valid = 0;
                 memset(lfn_name, 0, sizeof(lfn_name));
             }

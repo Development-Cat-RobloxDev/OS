@@ -3,11 +3,6 @@
 #include "../PNG_Decoder/PNG_Decoder.h"
 #include "../../Syscalls.h"
 
-#define SYSCALL_SERIAL_PUTS       2ULL
-#define SYSCALL_PROCESS_YIELD     4ULL
-#define SYSCALL_DRAW_FILL_RECT    11ULL
-#define SYSCALL_DRAW_PRESENT      12ULL
-
 typedef struct {
     uint32_t width;
     uint32_t height;
@@ -126,18 +121,43 @@ void _start(void)
     uint32_t frame = 0;
 
     serial_write_string("[U][APP] standalone process started\n");
+    if (wm_create_window(450, 250) < 0) {
+        serial_write_string("[U] Failed to create window\n");
+    }
+
+    if (wm_create_window(300, 150) < 0) {
+        serial_write_string("[U] Failed to create window\n");
+    }
+
     ImageSize img = {0, 0};
     uint32_t* rgba = load_png("LOGO.PNG", &img);
     if (!rgba) {
         serial_write_string("[U] PNG draw disabled\n");
     }
 
-    while (1) {
-        draw_fill_rect(0, 0, 640, 480, 0xFFFFFFF);
-        draw_png_image(rgba, &img, 16, 16);
-        draw_present();
+    static user_mouse_state_t mouse;
 
-        ++frame;
+    while (1) {
+        mouse_read(&mouse);
+
+        draw_fill_rect(0, 0, 640, 480, 0xFFFFFFFFu);
+
+        draw_png_image(rgba, &img, 0, 0);
+
+        if (mouse.valid) {
+            int32_t rect_x = mouse.x;
+            int32_t rect_y = mouse.y;
+            
+            if (rect_x < 0) rect_x = 0;
+            if (rect_y < 0) rect_y = 0;
+            if (rect_x > 640 - 100) rect_x = 640 - 100;
+            if (rect_y > 480 - 100) rect_y = 480 - 100;
+
+            draw_fill_rect(rect_x, rect_y, 100, 100, 0xFF0000FFu);
+        }
+
+        draw_present();
         process_yield();
     }
+
 }

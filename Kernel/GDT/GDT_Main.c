@@ -60,3 +60,8 @@ void init_gdt(void) {
     tss_flush(GDT_TSS);
     serial_write_string("[OS] [GDT] Successfully Initialize GDT.\n");
 }
+
+void gdt_set_kernel_rsp0(uint64_t rsp0)
+{
+    tss.rsp0 = rsp0 & ~0xFULL;
+}

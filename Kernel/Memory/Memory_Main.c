@@ -6,6 +6,7 @@
 
 #define PAGE_SIZE 4096
 #define MAX_PAGES 262144
+#define USER_RESERVED_TOP 0x08000000ULL
 
 static uint8_t page_bitmap[MAX_PAGES];
 
@@ -135,7 +136,9 @@ static void* kmalloc_locked(uint32_t size) {
 static uint32_t calc_heap_start_page(void) {
     if (heap_start_page != 0) return heap_start_page;
     uintptr_t end = (uintptr_t)&_kernel_end;
-    heap_start_page = (uint32_t)((end + PAGE_SIZE - 1) / PAGE_SIZE);
+    uint32_t kernel_end_page = (uint32_t)((end + PAGE_SIZE - 1) / PAGE_SIZE);
+    uint32_t user_reserved_page = (uint32_t)(USER_RESERVED_TOP / PAGE_SIZE);
+    heap_start_page = (kernel_end_page > user_reserved_page) ? kernel_end_page : user_reserved_page;
     return heap_start_page;
 }
 
@@ -446,6 +449,46 @@ void* alloc_page(void) {
     return NULL;
 }
 
+void* alloc_contiguous_pages(uint32_t page_count, uint32_t align_pages) {
+    if (page_count == 0 || page_count > MAX_PAGES) {
+        return NULL;
+    }
+    if (align_pages == 0) {
+        align_pages = 1;
+    }
+
+    uint64_t irq_flags = irq_save_disable();
+    spin_lock(&page_lock);
+
+    uint32_t limit = (uint32_t)(MAX_PAGES - page_count);
+    for (uint32_t start = 0; start <= limit; ++start) {
+        if ((start % align_pages) != 0) {
+            continue;
+        }
+
+        uint32_t run = 0;
+        while (run < page_count && page_bitmap[start + run] == 0) {
+            ++run;
+        }
+        if (run != page_count) {
+            start += run;
+            continue;
+        }
+
+        for (uint32_t i = 0; i < page_count; ++i) {
+            page_bitmap[start + i] = 1;
+        }
+        page_alloc_hint = (start + page_count) % MAX_PAGES;
+        spin_unlock(&page_lock);
+        irq_restore(irq_flags);
+        return (void *)((uintptr_t)start * PAGE_SIZE);
+    }
+
+    spin_unlock(&page_lock);
+    irq_restore(irq_flags);
+    return NULL;
+}
+
 void free_page(void* addr) {
     if (addr == NULL) return;
 
@@ -458,6 +501,35 @@ void free_page(void* addr) {
             page_alloc_hint = (uint32_t)page_num;
         }
     }
+    spin_unlock(&page_lock);
+    irq_restore(irq_flags);
+}
+
+void free_contiguous_pages(void* addr, uint32_t page_count) {
+    if (addr == NULL || page_count == 0) {
+        return;
+    }
+
+    uintptr_t start_page = (uintptr_t)addr / PAGE_SIZE;
+    if (start_page >= MAX_PAGES) {
+        return;
+    }
+
+    uint64_t irq_flags = irq_save_disable();
+    spin_lock(&page_lock);
+
+    uint32_t max_pages = (uint32_t)(MAX_PAGES - start_page);
+    if (page_count > max_pages) {
+        page_count = max_pages;
+    }
+
+    for (uint32_t i = 0; i < page_count; ++i) {
+        page_bitmap[start_page + i] = 0;
+    }
+    if (start_page < page_alloc_hint) {
+        page_alloc_hint = (uint32_t)start_page;
+    }
+
     spin_unlock(&page_lock);
     irq_restore(irq_flags);
 }

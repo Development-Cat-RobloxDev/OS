@@ -3,7 +3,9 @@ BITS 64
 global load_idt
 global isr_default
 global isr_page_fault
+global isr_double_fault
 
+extern double_fault_handler
 extern page_fault_handler
 
 SECTION .data
@@ -49,51 +51,19 @@ isr_default:
     iretq
 
 isr_page_fault:
-    mov rbx, rsp
+    cli
 
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push rbp
-    push r8
-    push r9
-    push r10
-    push r11
-    push r12
-    push r13
-    push r14
-    push r15
+    mov rdi, [rsp]
+    mov rsi, [rsp + 8]
+    mov rdx, rsp
+    mov rcx, cr2
 
-    mov rdi, [rbx + 0]
-    mov rsi, [rbx + 8]
-    mov rdx, [rbx + 32]
-    mov rax, cr2
-    mov rcx, rax
-
-    sub rsp, 8
     call page_fault_handler
-    add rsp, 8
 
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rbp
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-
-    iretq
+isr_double_fault:
+    cli
+    mov rdi, rsp
+    call double_fault_handler
 
 load_idt:
     cli

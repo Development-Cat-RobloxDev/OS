@@ -11,6 +11,13 @@ void free(void* ptr) {
     kfree(ptr);
 }
 
+void *memset(void *ptr, int value, size_t num) {
+    unsigned char *p = (unsigned char*)ptr;
+    for (size_t i = 0; i < num; i++)
+        p[i] = (unsigned char)value;
+    return ptr;
+}
+
 void* memcpy(void* dst, const void* src, size_t n) {
     uint8_t* d = dst;
     const uint8_t* s = src;

@@ -6,10 +6,13 @@
 #include "IO/IO_Main.h"
 #include "Drivers/FileSystem/FAT32/FAT32_Main.h"
 #include "Drivers/Display/Display_Main.h"
+#include "Drivers/USB/USB_HID_Mouse/USB_HID_Mouse.h"
+#include "Drivers/USB/USB_Main.h"
 #include "ELF/ELF_Loader.h"
 #include "Syscall/Syscall_Main.h"
 #include "Syscall/Syscall_File.h"
 #include "ProcessManager/ProcessManager.h"
+#include "WindowManager/WindowManager.h"
 #include "Serial.h"
 
 #define COM1_PORT 0x3F8
@@ -20,10 +23,6 @@
 #define GDT_USER_DATA        0x20
 #define GDT_USER_CODE        0x28
 #define GDT_TSS              0x30
-
-#define USER_STACK_SIZE 8192
-__attribute__((aligned(16)))
-static uint8_t user_stack[USER_STACK_SIZE];
 
 #define USER_ELF_MAX_SIZE (2ULL * 1024ULL * 1024ULL)
 #define USER_ELF_VADDR_MIN 0x00400000ULL
@@ -83,28 +82,25 @@ static bool load_userland_elf(uint64_t *entry_out) {
     return elf_loader_load_from_path("Userland/Userland.ELF", &policy, entry_out);
 }
 
+// Kernel/Kernel_Main.c
+
 __attribute__((noreturn))
 void entry_user_mode() {
-    serial_write_string("[OS] Entering user mode...\n");
-    serial_write_string("[OS] User entry: ");
-    serial_write_uint64(user_entry);
-    serial_write_string("\n");
-
     uint64_t user_rip = user_entry;
-    uint64_t user_rsp = ((uint64_t)user_stack + USER_STACK_SIZE) & ~0xFULL;
-    uint64_t rflags   = 0x202;
+    uint64_t user_rsp = process_get_current_user_rsp() - 128;
+    uint64_t user_cr3 = process_get_current_cr3();
+    
+    paging_switch_cr3(user_cr3);
 
     uint64_t user_ss = GDT_USER_DATA | 3;
     uint64_t user_cs = GDT_USER_CODE | 3;
+    uint64_t rflags  = 0x202;
 
     __asm__ volatile (
         "cli\n"
-
         "mov %0, %%ax\n"
         "mov %%ax, %%ds\n"
         "mov %%ax, %%es\n"
-        "mov %%ax, %%fs\n"
-        "mov %%ax, %%gs\n"
 
         "pushq %1\n"
         "pushq %2\n"
@@ -113,12 +109,7 @@ void entry_user_mode() {
         "pushq %5\n"
         "iretq\n"
         :
-        : "r"((uint16_t)(user_ss)),
-          "r"(user_ss),
-          "r"(user_rsp),
-          "r"(rflags),
-          "r"(user_cs),
-          "r"(user_rip)
+        : "r"((uint16_t)user_ss), "r"(user_ss), "r"(user_rsp), "r"(rflags), "r"(user_cs), "r"(user_rip)
         : "rax", "memory"
     );
     __builtin_unreachable();
@@ -155,12 +146,30 @@ void kernel_main(BOOT_INFO *boot_info) {
     if (!display_init()) {
         serial_write_string("[OS] [WARN] Display init failed\n");
     }
+
+    serial_write_string("[OS] Initializing USB (xHCI)...\n");
+    if (!usb_main_init()) {
+        serial_write_string("[OS] [WARN] USB init failed (no mouse support)\n");
+    } else {
+        serial_write_string("[OS] Initializing HID mouse...\n");
+        hid_mouse_init();
+        hid_mouse_set_bounds(0, 0, 640 - 1, 480 - 1);
+        hid_mouse_set_position(640 / 2, 480 / 2);
+
+        uint32_t sw = display_is_ready() ? display_width()  : 1920;
+        uint32_t sh = display_is_ready() ? display_height() : 1080;
+        hid_mouse_set_bounds(0, 0, (int32_t)(sw - 1), (int32_t)(sh - 1));
+        hid_mouse_set_position((int32_t)(sw / 2), (int32_t)(sh / 2));
+    }
     
     serial_write_string("[OS] Initializing syscall...\n");
     syscall_init(); 
 
     serial_write_string("[OS] Initializing process manager...\n");
     process_manager_init();
+
+    serial_write_string("[OS] Initializing window manager...\n");
+    window_manager_init();
 
     syscall_file_init();
 
@@ -176,7 +185,7 @@ void kernel_main(BOOT_INFO *boot_info) {
     serial_write_string("[OS] ===== Kernel Init Complete =====\n");
     serial_write_string("[OS] Transferring control to userland...\n\n");
 
-    if (process_register_boot_process(user_entry, (uint64_t)user_stack + USER_STACK_SIZE) < 0) {
+    if (process_register_boot_process(user_entry, 0) < 0) {
         serial_write_string("[OS] [ERROR] Failed to register boot process\n");
         while (1) {
             __asm__("hlt");

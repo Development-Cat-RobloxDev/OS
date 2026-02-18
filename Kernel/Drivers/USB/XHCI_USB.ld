@@ -1,9 +1,9 @@
 OUTPUT_FORMAT(elf64-x86-64)
-ENTRY(_start)
+ENTRY(driver_module_init)
 
 SECTIONS
 {
-    . = 0x600000;
+    . = 0x00C00000;
 
     .text ALIGN(4K) : {
         *(.text*)

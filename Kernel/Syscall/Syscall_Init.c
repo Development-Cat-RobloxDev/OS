@@ -39,6 +39,16 @@ void syscall_set_user_rsp(uint64_t user_rsp)
     g_syscall_cpu_state.user_rsp = user_rsp;
 }
 
+uint64_t syscall_get_kernel_rsp(void)
+{
+    return g_syscall_cpu_state.kernel_rsp;
+}
+
+void syscall_set_kernel_rsp(uint64_t kernel_rsp)
+{
+    g_syscall_cpu_state.kernel_rsp = kernel_rsp & ~0xFULL;
+}
+
 void syscall_init(void) {
     uint64_t kernel_rsp = (uint64_t)(g_syscall_kernel_stack + SYSCALL_KERNEL_STACK_SIZE);
     g_syscall_cpu_state.user_rsp = 0;

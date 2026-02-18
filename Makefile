@@ -15,11 +15,12 @@ OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 KERNEL_DIR   := Kernel
 USERLAND_DIR := Userland
 
-KERNEL_ELF  := $(BUILD_DIR)/Kernel/Kernel_Main.ELF
-BOOTX64_EFI := $(BUILD_DIR)/Loader/BOOTX64.EFI
+KERNEL_ELF        := $(BUILD_DIR)/Kernel/Kernel_Main.ELF
+BOOTX64_EFI       := $(BUILD_DIR)/Loader/BOOTX64.EFI
 USERLAND_INIT_ELF := $(BUILD_DIR)/Userland/Userland.ELF
 USERLAND_APP_ELF  := $(BUILD_DIR)/Userland/SystemApps/UserApp.ELF
 VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Drivers/VirtIO_Driver.ELF
+XHCI_USB_ELF      := $(BUILD_DIR)/Drivers/XHCI_USB.ELF
 INTEL_DRIVER_ELF  := $(BUILD_DIR)/Drivers/Intel_UHD_Graphics_9TH_Driver.ELF
 
 KERNEL_CFLAGS := \
@@ -38,7 +39,7 @@ LOADER_CFLAGS := \
 	-fno-builtin -mno-red-zone \
 	-Wall -Wextra -DEFI_FUNCTION_WRAPPER
 
-USERLAND_LDFLAGS := -T Userland/Userland.ld -nostdlib --build-id=none
+USERLAND_LDFLAGS     := -T Userland/Userland.ld -nostdlib --build-id=none
 USERLAND_APP_LDFLAGS := -T Userland/Application/SystemApps/UserApp.ld -nostdlib --build-id=none
 USERLAND_CFLAGS := \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-builtin \
@@ -51,15 +52,16 @@ USERLAND_CXXFLAGS := \
 	-fno-exceptions -fno-rtti \
 	-Wall -Wextra -MMD -MP
 
-DRIVER_MODULE_CFLAGS := $(KERNEL_CFLAGS) -DIMPLUS_DRIVER_MODULE
+DRIVER_MODULE_CFLAGS  := $(KERNEL_CFLAGS) -DIMPLUS_DRIVER_MODULE
 VIRTIO_DRIVER_LDFLAGS := -T Kernel/Drivers/Display/VirtIO/VirtIO_Module.ld -nostdlib --build-id=none
-INTEL_DRIVER_LDFLAGS := -T Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Module.ld -nostdlib --build-id=none
+INTEL_DRIVER_LDFLAGS  := -T Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Module.ld -nostdlib --build-id=none
+XHCI_USB_LDFLAGS      := -T Kernel/Drivers/USB/XHCI_USB.ld -nostdlib --build-id=none
 
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
 	Kernel/Memory/Memory_Main.c \
-	Kernel/Memory/Memory_Utils.c \
 	Kernel/Memory/Other_Utils.c \
+	Kernel/Memory/DMA_Memory.c \
 	Kernel/Paging/Paging_Main.c \
 	Kernel/IDT/IDT_Main.c \
 	Kernel/IO/IO_Main.c \
@@ -69,7 +71,10 @@ KERNEL_C_SRCS := \
 	Kernel/Drivers/DriverSelect.c \
 	Kernel/Drivers/Display/Display_Main.c \
 	Kernel/Drivers/PCI/PCI_Main.c \
+	Kernel/Drivers/USB/USB_Main.c \
+	Kernel/Drivers/USB/USB_HID_Mouse/USB_HID_Mouse.c \
 	Kernel/ProcessManager/ProcessManager_Create.c \
+	Kernel/WindowManager/WindowManager.c \
 	Kernel/Syscall/Syscall_Init.c \
 	Kernel/Syscall/Syscall_File.c \
 	Kernel/Syscall/Syscall_Dispatch.c
@@ -89,14 +94,16 @@ USERLAND_APP_C_SRCS := \
 	Userland/Application/PNG_Decoder/PNG_Decoder.c \
 	Userland/Syscalls.c
 
-KERNEL_OBJS := $(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) $(KERNEL_ASM_SRCS:%.asm=$(BUILD_DIR)/%.o)
+KERNEL_OBJS       := $(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) \
+                     $(KERNEL_ASM_SRCS:%.asm=$(BUILD_DIR)/%.o)
 USERLAND_INIT_OBJS := $(USERLAND_C_SRCS:%.c=$(BUILD_DIR)/%.o)
-USERLAND_APP_OBJS := $(USERLAND_APP_C_SRCS:%.c=$(BUILD_DIR)/%.o)
+USERLAND_APP_OBJS  := $(USERLAND_APP_C_SRCS:%.c=$(BUILD_DIR)/%.o)
 DRIVER_MODULE_OBJS := \
 	$(BUILD_DIR)/Modules/VirtIO_Module.o \
 	$(BUILD_DIR)/Modules/Intel_Module.o
 
-all: $(BOOTX64_EFI) $(KERNEL_ELF) $(USERLAND_INIT_ELF) $(USERLAND_APP_ELF) $(VIRTIO_DRIVER_ELF) $(INTEL_DRIVER_ELF)
+all: $(BOOTX64_EFI) $(KERNEL_ELF) $(USERLAND_INIT_ELF) $(USERLAND_APP_ELF) \
+     $(VIRTIO_DRIVER_ELF) $(INTEL_DRIVER_ELF) $(XHCI_USB_ELF)
 
 $(BUILD_DIR)/Loader/Loader.o: BootLoader/Loader.c
 	mkdir -p $(dir $@)
@@ -153,6 +160,10 @@ $(BUILD_DIR)/Modules/Intel_Module.o: Kernel/Drivers/Display/Intel_UHD_Graphics_9
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/Modules/XHCI_USB_Module.o: Kernel/Drivers/USB/XHCI_USB.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
 $(VIRTIO_DRIVER_ELF): $(BUILD_DIR)/Modules/VirtIO_Module.o
 	mkdir -p $(dir $@)
 	$(LD) $(VIRTIO_DRIVER_LDFLAGS) $^ -o $@
@@ -161,29 +172,34 @@ $(INTEL_DRIVER_ELF): $(BUILD_DIR)/Modules/Intel_Module.o
 	mkdir -p $(dir $@)
 	$(LD) $(INTEL_DRIVER_LDFLAGS) $^ -o $@
 
+$(XHCI_USB_ELF): $(BUILD_DIR)/Modules/XHCI_USB_Module.o
+	mkdir -p $(dir $@)
+	$(LD) $(XHCI_USB_LDFLAGS) $^ -o $@
+
 image: all
 	mkdir -p $(IMAGE_DIR)
 	dd if=/dev/zero of=$(IMAGE) bs=1M count=128
 	parted $(IMAGE) --script mklabel gpt mkpart ESP fat32 1MiB 100% set 1 esp on
 	sudo losetup -Pf --show $(IMAGE) | while read LOOP; do \
 		sudo mkfs.fat -F32 $${LOOP}p1; \
-	sudo mount $${LOOP}p1 /mnt; \
-	sudo mkdir -p /mnt/EFI/BOOT; \
-	sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
-	sudo mkdir -p /mnt/Kernel; \
-	sudo mkdir -p /mnt/Userland; \
-	sudo mkdir -p /mnt/Userland/SystemApps; \
-	sudo cp $(KERNEL_ELF) /mnt/Kernel/Kernel_Main.ELF; \
-	sudo cp $(USERLAND_INIT_ELF) /mnt/Userland/Userland.ELF; \
-	sudo cp $(USERLAND_APP_ELF) /mnt/Userland/SystemApps/UserApp.ELF; \
-	sudo mkdir -p /mnt/Kernel/Driver; \
-	sudo cp $(VIRTIO_DRIVER_ELF) /mnt/Kernel/Driver/; \
-	sudo cp $(INTEL_DRIVER_ELF) /mnt/Kernel/Driver/; \
-	sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
-	sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
-	sync; \
-	sudo umount /mnt; \
-	sudo losetup -d $$LOOP; \
+		sudo mount $${LOOP}p1 /mnt; \
+		sudo mkdir -p /mnt/EFI/BOOT; \
+		sudo cp $(BOOTX64_EFI) /mnt/EFI/BOOT/BOOTX64.EFI; \
+		sudo mkdir -p /mnt/Kernel; \
+		sudo mkdir -p /mnt/Userland; \
+		sudo mkdir -p /mnt/Userland/SystemApps; \
+		sudo cp $(KERNEL_ELF) /mnt/Kernel/Kernel_Main.ELF; \
+		sudo cp $(USERLAND_INIT_ELF) /mnt/Userland/Userland.ELF; \
+		sudo cp $(USERLAND_APP_ELF) /mnt/Userland/SystemApps/UserApp.ELF; \
+		sudo mkdir -p /mnt/Kernel/Driver; \
+		sudo cp $(VIRTIO_DRIVER_ELF) /mnt/Kernel/Driver/; \
+		sudo cp $(INTEL_DRIVER_ELF) /mnt/Kernel/Driver/; \
+		sudo cp $(XHCI_USB_ELF) /mnt/Kernel/Driver/; \
+		sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
+		sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
+		sync; \
+		sudo umount /mnt; \
+		sudo losetup -d $$LOOP; \
 	done
 
 ISO_ROOT := $(IMAGE_DIR)/iso_root
@@ -198,11 +214,12 @@ image_esp: all
 	cp $(BOOTX64_EFI) $(ISO_ROOT)/EFI/BOOT/BOOTX64.EFI
 	cp $(KERNEL_ELF)  $(ISO_ROOT)/Kernel/Kernel_Main.ELF
 	cp $(USERLAND_INIT_ELF) $(ISO_ROOT)/Userland/Userland.ELF
-	cp $(USERLAND_APP_ELF) $(ISO_ROOT)/Userland/SystemApps/UserApp.ELF
+	cp $(USERLAND_APP_ELF)  $(ISO_ROOT)/Userland/SystemApps/UserApp.ELF
 	cp $(VIRTIO_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
-	cp $(INTEL_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
-	cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT
-	cp Userland/LOGO.PNG $(ISO_ROOT)/LOGO.PNG; \
+	cp $(INTEL_DRIVER_ELF)  $(ISO_ROOT)/Kernel/Driver/
+	cp $(XHCI_USB_ELF)      $(ISO_ROOT)/Kernel/Driver/
+	cp Kernel/FILE.TXT      $(ISO_ROOT)/FILE.TXT
+	cp Userland/LOGO.PNG    $(ISO_ROOT)/LOGO.PNG
 	dd if=/dev/zero of=$(ESP_IMG) bs=1M count=64
 	mkfs.fat -F32 $(ESP_IMG)
 	mkdir -p /tmp/esp_mount
@@ -212,12 +229,15 @@ image_esp: all
 	sync
 	sudo umount /tmp/esp_mount
 	cp $(ESP_IMG) $(ISO_ROOT)/esp.iso
-	xorriso -as mkisofs -R -J -V "MY_OS" -o $(IMAGE) -eltorito-alt-boot -e esp.iso -no-emul-boot $(ISO_ROOT)
+	xorriso -as mkisofs -R -J -V "MY_OS" -o $(IMAGE) \
+		-eltorito-alt-boot -e esp.iso -no-emul-boot $(ISO_ROOT)
 
 run: image
 	qemu-system-x86_64 -m 512M -vga none -device virtio-vga \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive format=raw,file=$(IMAGE) -serial stdio
+		-drive format=raw,file=$(IMAGE) \
+		-serial stdio \
+		-device qemu-xhci -device usb-mouse
 
 clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)

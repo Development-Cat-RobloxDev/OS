@@ -1,5 +1,6 @@
 #include "IDT_Main.h"
 #include "../IO/IO_Main.h"
+#include "../ProcessManager/ProcessManager.h"
 #include "../Serial.h"
 
 #define MAX_IRQS 256
@@ -29,6 +30,14 @@ void irq_handler(uint16_t irq_num) {
             outb(0xA0, 0x20);
         }
     }
+}
+
+void double_fault_handler(uint64_t rsp) {
+    serial_write_string("DOUBLE FAULT\n");
+    serial_write_string("RSP: ");
+    serial_write_uint64(rsp);
+    serial_write_string("\n");
+    while (1) { __asm__("hlt"); }
 }
 
 void set_interrupt_handler(uint16_t n, void (*handler)(void)) {
@@ -61,6 +70,12 @@ void init_idt(void) {
 }
 
 void page_fault_handler(uint64_t error_code, uint64_t rip, uint64_t rsp, uint64_t cr2) {
+    const uint64_t PF_PRESENT = (1ULL << 0);
+    const uint64_t PF_WRITE = (1ULL << 1);
+    const uint64_t PF_USER = (1ULL << 2);
+    const uint64_t PF_RSVD = (1ULL << 3);
+    const uint64_t PF_INSTR = (1ULL << 4);
+
     serial_write_string("[OS] [PF] Page fault\n");
     serial_write_string("[OS] [PF] CR2: ");
     serial_write_uint64(cr2);
@@ -74,6 +89,28 @@ void page_fault_handler(uint64_t error_code, uint64_t rip, uint64_t rsp, uint64_
     serial_write_string("[OS] [PF] Error: ");
     serial_write_uint64(error_code);
     serial_write_string("\n");
+
+    serial_write_string("[OS] [PF] Access: ");
+    serial_write_string((error_code & PF_WRITE) ? "write" : "read");
+    serial_write_string(", mode: ");
+    serial_write_string((error_code & PF_USER) ? "user" : "kernel");
+    serial_write_string(", present: ");
+    serial_write_string((error_code & PF_PRESENT) ? "yes" : "no");
+    serial_write_string(", reserved: ");
+    serial_write_string((error_code & PF_RSVD) ? "yes" : "no");
+    serial_write_string(", exec: ");
+    serial_write_string((error_code & PF_INSTR) ? "yes" : "no");
+    serial_write_string("\n");
+
+    if (error_code & PF_USER) {
+        int32_t pid = process_get_current_pid();
+        serial_write_string("[OS] [PF] Invalid user memory access. pid=");
+        serial_write_uint32((uint32_t)pid);
+        serial_write_string("\n");
+        process_exit_current();
+    } else {
+        serial_write_string("[OS] [PF] Kernel memory fault\n");
+    }
 
     while (1) {
         __asm__("hlt");
