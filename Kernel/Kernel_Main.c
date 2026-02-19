@@ -6,8 +6,6 @@
 #include "IO/IO_Main.h"
 #include "Drivers/FileSystem/FAT32/FAT32_Main.h"
 #include "Drivers/Display/Display_Main.h"
-#include "Drivers/USB/USB_HID_Mouse/USB_HID_Mouse.h"
-#include "Drivers/USB/USB_Main.h"
 #include "ELF/ELF_Loader.h"
 #include "Syscall/Syscall_Main.h"
 #include "Syscall/Syscall_File.h"
@@ -145,21 +143,6 @@ void kernel_main(BOOT_INFO *boot_info) {
     serial_write_string("[OS] Initializing display...\n");
     if (!display_init()) {
         serial_write_string("[OS] [WARN] Display init failed\n");
-    }
-
-    serial_write_string("[OS] Initializing USB (xHCI)...\n");
-    if (!usb_main_init()) {
-        serial_write_string("[OS] [WARN] USB init failed (no mouse support)\n");
-    } else {
-        serial_write_string("[OS] Initializing HID mouse...\n");
-        hid_mouse_init();
-        hid_mouse_set_bounds(0, 0, 640 - 1, 480 - 1);
-        hid_mouse_set_position(640 / 2, 480 / 2);
-
-        uint32_t sw = display_is_ready() ? display_width()  : 1920;
-        uint32_t sh = display_is_ready() ? display_height() : 1080;
-        hid_mouse_set_bounds(0, 0, (int32_t)(sw - 1), (int32_t)(sh - 1));
-        hid_mouse_set_position((int32_t)(sw / 2), (int32_t)(sh / 2));
     }
     
     serial_write_string("[OS] Initializing syscall...\n");

@@ -2,9 +2,14 @@
 
 #define SYSCALL_SERIAL_PUTCHAR     1ULL
 #define SYSCALL_SERIAL_PUTS        2ULL
-#define SYSCALL_PROCESS_YIELD      4ULL
-#define SYSCALL_PROCESS_EXIT       5ULL
-#define SYSCALL_PROCESS_SPAWN_ELF  7ULL
+#define SYSCALL_SERIAL_WRITE_U64   3ULL
+#define SYSCALL_SERIAL_WRITE_U32   4ULL
+#define SYSCALL_SERIAL_WRITE_U16   5ULL
+#define SYSCALL_PROCESS_CREATE     6ULL
+#define SYSCALL_PROCESS_YIELD      7ULL
+#define SYSCALL_PROCESS_EXIT       8ULL
+#define SYSCALL_THREAD_CREATE      9ULL
+#define SYSCALL_PROCESS_SPAWN_ELF  36ULL
 
 static inline uint64_t syscall0(uint64_t num)
 {
@@ -35,7 +40,7 @@ static void serial_write_string(const char *str)
     (void)syscall1(SYSCALL_SERIAL_PUTS, (uint64_t)str);
 }
 
-static void serial_write_i32(int32_t value)
+static void serial_write_uint32(int32_t value)
 {
     char buf[12];
     int idx = 0;
@@ -95,7 +100,7 @@ void _start(void)
     }
 
     serial_write_string("[U][INIT] spawned UserApp.ELF pid=");
-    serial_write_i32(pid);
+    serial_write_uint32(pid);
     serial_write_string("\n");
     serial_write_string("[U][INIT] exiting init process\n");
 

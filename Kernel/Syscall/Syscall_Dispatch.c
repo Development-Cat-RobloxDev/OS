@@ -3,7 +3,6 @@
 #include "../ProcessManager/ProcessManager.h"
 #include "../Serial.h"
 #include "../WindowManager/WindowManager.h"
-#include "../Drivers/USB/USB_HID_Mouse/USB_HID_Mouse.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -14,8 +13,6 @@
 #define SYSCALL_MAX_MEM_BYTES (4ULL * 1024ULL * 1024ULL)
 #define SYSCALL_MAX_ALLOC_BYTES (1024U * 1024U)
 #define SYSCALL_MAX_WINDOW_SIZE 4096U
-
-#define SYSCALL_MOUSE_STATE_SIZE 32U
 
 static void set_syscall_result(uint64_t saved_rsp, uint64_t value)
 {
@@ -65,6 +62,66 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
             break;
         }
         serial_write_string(buffer);
+        set_syscall_result(saved_rsp, 0);
+        break;
+    }
+
+    case SYSCALL_SERIAL_WRITE_U64: {
+        uint64_t value = arg1;
+        char buf[32];
+        int i = 30;
+        buf[31] = '\0';
+
+        if (value == 0) {
+        buf[i--] = '0';
+        } else {
+            while (value > 0 && i >= 0) {
+                buf[i--] = '0' + (value % 10);
+                value /= 10;
+            }
+        }
+
+        serial_write_string(&buf[i + 1]);
+        set_syscall_result(saved_rsp, 0);
+        break;
+    }
+
+    case SYSCALL_SERIAL_WRITE_U32: {
+        uint32_t value = (uint32_t)arg1;
+        char buf[16];
+        int i = 14;
+        buf[15] = '\0';
+
+        if (value == 0) {
+        buf[i--] = '0';
+        } else {
+            while (value > 0 && i >= 0) {
+                buf[i--] = '0' + (value % 10);
+                value /= 10;
+            }
+    }
+
+        serial_write_string(&buf[i + 1]);
+        set_syscall_result(saved_rsp, 0);
+        break;
+    }
+
+    case SYSCALL_SERIAL_WRITE_U16: {
+        uint16_t value = (uint16_t)arg1;
+        char buf[8];
+        int i = 6;
+        buf[7] = '\0';
+
+        if (value == 0) {
+            buf[i--] = '0';
+        } else {
+            while (value > 0 && i >= 0) {
+                buf[i--] = '0' + (value % 10);
+                value /= 10;
+            }
+    }
+
+        serial_write_string(&buf[i + 1]);
         set_syscall_result(saved_rsp, 0);
         break;
     }
@@ -243,79 +300,6 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
             if (s1[i] != s2[i]) { result = (int)s1[i] - (int)s2[i]; break; }
         }
         set_syscall_result(saved_rsp, (uint64_t)(int64_t)result);
-        break;
-    }
-
-    case SYSCALL_MOUSE_READ: {
-        void *user_buf = (void *)(uintptr_t)arg1;
-        if (!user_buffer_ok(user_buf, SYSCALL_MOUSE_STATE_SIZE)) {
-            set_syscall_result(saved_rsp, (uint64_t)-1);
-            break;
-        }
-
-        hid_mouse_poll();
-
-        if (!hid_mouse_is_ready()) {
-            set_syscall_result(saved_rsp, (uint64_t)-1);
-            break;
-        }
-        
-        mouse_state_t ms;
-        hid_mouse_get_state(&ms);
-
-        uint8_t *dst = (uint8_t *)user_buf;
-
-        dst[ 0] = (uint8_t)(ms.x);
-        dst[ 1] = (uint8_t)(ms.x >> 8);
-        dst[ 2] = (uint8_t)(ms.x >> 16);
-        dst[ 3] = (uint8_t)(ms.x >> 24);
-
-        dst[ 4] = (uint8_t)(ms.y);
-        dst[ 5] = (uint8_t)(ms.y >> 8);
-        dst[ 6] = (uint8_t)(ms.y >> 16);
-        dst[ 7] = (uint8_t)(ms.y >> 24);
-
-        dst[ 8] = (uint8_t)(ms.dx);
-        dst[ 9] = (uint8_t)(ms.dx >> 8);
-        dst[10] = (uint8_t)(ms.dx >> 16);
-        dst[11] = (uint8_t)(ms.dx >> 24);
-
-        dst[12] = (uint8_t)(ms.dy);
-        dst[13] = (uint8_t)(ms.dy >> 8);
-        dst[14] = (uint8_t)(ms.dy >> 16);
-        dst[15] = (uint8_t)(ms.dy >> 24);
-
-        dst[16] = (uint8_t)(ms.wheel);
-        dst[17] = (uint8_t)(ms.wheel >> 8);
-        dst[18] = (uint8_t)(ms.wheel >> 16);
-        dst[19] = (uint8_t)(ms.wheel >> 24);
-
-        dst[20] = ms.buttons;
-        dst[21] = ms.pressed;
-        dst[22] = ms.released;
-        dst[23] = ms.valid ? 1u : 0u;
-        
-        for (uint32_t i = 24; i < SYSCALL_MOUSE_STATE_SIZE; ++i) dst[i] = 0;
-
-        set_syscall_result(saved_rsp, 0);
-        break;
-    }
-
-    case SYSCALL_MOUSE_SET_POS: {
-        int32_t mx = (int32_t)(uint32_t)arg1;
-        int32_t my = (int32_t)(uint32_t)arg2;
-        hid_mouse_set_position(mx, my);
-        set_syscall_result(saved_rsp, 0);
-        break;
-    }
-
-    case SYSCALL_MOUSE_SET_BOUNDS: {
-        int32_t min_x = (int32_t)(uint32_t)arg1;
-        int32_t min_y = (int32_t)(uint32_t)arg2;
-        int32_t max_x = (int32_t)(uint32_t)(arg3 >> 32);
-        int32_t max_y = (int32_t)(uint32_t)(arg3 & 0xFFFFFFFFu);
-        hid_mouse_set_bounds(min_x, min_y, max_x, max_y);
-        set_syscall_result(saved_rsp, 0);
         break;
     }
 

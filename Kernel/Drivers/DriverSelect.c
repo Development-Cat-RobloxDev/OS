@@ -15,7 +15,6 @@
 #define DISPLAY_DRIVER_VADDR_MAX 0x02000000ULL
 #define VIRTIO_DRIVER_MODULE_PATH "Kernel/Driver/VirtIO_Driver.ELF"
 #define INTEL_DRIVER_MODULE_PATH  "Kernel/Driver/Intel_UHD_Graphics_9TH_Driver.ELF"
-#define XHCI_USB_DRIVER_MODULE_PATH  "Kernel/Driver/XHCI_USB.ELF"
 
 static const display_driver_t *g_display_drivers[MAX_DISPLAY_DRIVERS];
 static uint32_t g_display_driver_count = 0;
@@ -100,7 +99,6 @@ void driver_select_register_binary_display_drivers(void) {
     g_display_binary_registered = 1;
     load_display_driver_module(VIRTIO_DRIVER_MODULE_PATH);
     load_display_driver_module(INTEL_DRIVER_MODULE_PATH);
-    load_display_driver_module(XHCI_USB_DRIVER_MODULE_PATH);
 }
 
 const display_driver_t *driver_select_pick_display_driver(void) {

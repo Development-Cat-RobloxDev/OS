@@ -4,7 +4,6 @@
 #include <stddef.h>
 
 #include "Display/Display_Driver.h"
-#include "USB/XHCI_USB.h"
 
 typedef struct {
     void (*serial_write_string)(const char *str);
@@ -28,4 +27,3 @@ typedef struct {
 } driver_kernel_api_t;
 
 typedef const display_driver_t *(*display_driver_module_init_t)(const driver_kernel_api_t *api);
-typedef const usb_driver_t     *(*usb_driver_module_init_t)(const driver_kernel_api_t *api);

@@ -135,26 +135,10 @@ void _start(void)
         serial_write_string("[U] PNG draw disabled\n");
     }
 
-    static user_mouse_state_t mouse;
-
     while (1) {
-        mouse_read(&mouse);
-
         draw_fill_rect(0, 0, 640, 480, 0xFFFFFFFFu);
 
         draw_png_image(rgba, &img, 0, 0);
-
-        if (mouse.valid) {
-            int32_t rect_x = mouse.x;
-            int32_t rect_y = mouse.y;
-            
-            if (rect_x < 0) rect_x = 0;
-            if (rect_y < 0) rect_y = 0;
-            if (rect_x > 640 - 100) rect_x = 640 - 100;
-            if (rect_y > 480 - 100) rect_y = 480 - 100;
-
-            draw_fill_rect(rect_x, rect_y, 100, 100, 0xFF0000FFu);
-        }
 
         draw_present();
         process_yield();

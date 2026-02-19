@@ -19,9 +19,8 @@ KERNEL_ELF        := $(BUILD_DIR)/Kernel/Kernel_Main.ELF
 BOOTX64_EFI       := $(BUILD_DIR)/Loader/BOOTX64.EFI
 USERLAND_INIT_ELF := $(BUILD_DIR)/Userland/Userland.ELF
 USERLAND_APP_ELF  := $(BUILD_DIR)/Userland/SystemApps/UserApp.ELF
-VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Drivers/VirtIO_Driver.ELF
-XHCI_USB_ELF      := $(BUILD_DIR)/Drivers/XHCI_USB.ELF
-INTEL_DRIVER_ELF  := $(BUILD_DIR)/Drivers/Intel_UHD_Graphics_9TH_Driver.ELF
+VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Kernel/Drivers/Display/VirtIO_Driver.ELF
+INTEL_DRIVER_ELF  := $(BUILD_DIR)/Kernel/Drivers/Display/Intel_UHD_Graphics_9TH_Driver.ELF
 
 KERNEL_CFLAGS := \
 	-IKernel -IThirdParty \
@@ -55,7 +54,6 @@ USERLAND_CXXFLAGS := \
 DRIVER_MODULE_CFLAGS  := $(KERNEL_CFLAGS) -DIMPLUS_DRIVER_MODULE
 VIRTIO_DRIVER_LDFLAGS := -T Kernel/Drivers/Display/VirtIO/VirtIO_Module.ld -nostdlib --build-id=none
 INTEL_DRIVER_LDFLAGS  := -T Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Module.ld -nostdlib --build-id=none
-XHCI_USB_LDFLAGS      := -T Kernel/Drivers/USB/XHCI_USB.ld -nostdlib --build-id=none
 
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
@@ -71,8 +69,6 @@ KERNEL_C_SRCS := \
 	Kernel/Drivers/DriverSelect.c \
 	Kernel/Drivers/Display/Display_Main.c \
 	Kernel/Drivers/PCI/PCI_Main.c \
-	Kernel/Drivers/USB/USB_Main.c \
-	Kernel/Drivers/USB/USB_HID_Mouse/USB_HID_Mouse.c \
 	Kernel/ProcessManager/ProcessManager_Create.c \
 	Kernel/WindowManager/WindowManager.c \
 	Kernel/Syscall/Syscall_Init.c \
@@ -102,8 +98,13 @@ DRIVER_MODULE_OBJS := \
 	$(BUILD_DIR)/Modules/VirtIO_Module.o \
 	$(BUILD_DIR)/Modules/Intel_Module.o
 
-all: $(BOOTX64_EFI) $(KERNEL_ELF) $(USERLAND_INIT_ELF) $(USERLAND_APP_ELF) \
-     $(VIRTIO_DRIVER_ELF) $(INTEL_DRIVER_ELF) $(XHCI_USB_ELF)
+all: $(BOOTX64_EFI) \
+     $(KERNEL_ELF) \
+     $(USERLAND_INIT_ELF) \
+     $(USERLAND_APP_ELF) \
+     $(VIRTIO_DRIVER_ELF) \
+     $(INTEL_DRIVER_ELF)
+
 
 $(BUILD_DIR)/Loader/Loader.o: BootLoader/Loader.c
 	mkdir -p $(dir $@)
@@ -160,10 +161,6 @@ $(BUILD_DIR)/Modules/Intel_Module.o: Kernel/Drivers/Display/Intel_UHD_Graphics_9
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/Modules/XHCI_USB_Module.o: Kernel/Drivers/USB/XHCI_USB.c
-	mkdir -p $(dir $@)
-	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
-
 $(VIRTIO_DRIVER_ELF): $(BUILD_DIR)/Modules/VirtIO_Module.o
 	mkdir -p $(dir $@)
 	$(LD) $(VIRTIO_DRIVER_LDFLAGS) $^ -o $@
@@ -171,10 +168,6 @@ $(VIRTIO_DRIVER_ELF): $(BUILD_DIR)/Modules/VirtIO_Module.o
 $(INTEL_DRIVER_ELF): $(BUILD_DIR)/Modules/Intel_Module.o
 	mkdir -p $(dir $@)
 	$(LD) $(INTEL_DRIVER_LDFLAGS) $^ -o $@
-
-$(XHCI_USB_ELF): $(BUILD_DIR)/Modules/XHCI_USB_Module.o
-	mkdir -p $(dir $@)
-	$(LD) $(XHCI_USB_LDFLAGS) $^ -o $@
 
 image: all
 	mkdir -p $(IMAGE_DIR)
@@ -194,7 +187,6 @@ image: all
 		sudo mkdir -p /mnt/Kernel/Driver; \
 		sudo cp $(VIRTIO_DRIVER_ELF) /mnt/Kernel/Driver/; \
 		sudo cp $(INTEL_DRIVER_ELF) /mnt/Kernel/Driver/; \
-		sudo cp $(XHCI_USB_ELF) /mnt/Kernel/Driver/; \
 		sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
 		sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
 		sync; \
@@ -217,7 +209,6 @@ image_esp: all
 	cp $(USERLAND_APP_ELF)  $(ISO_ROOT)/Userland/SystemApps/UserApp.ELF
 	cp $(VIRTIO_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
 	cp $(INTEL_DRIVER_ELF)  $(ISO_ROOT)/Kernel/Driver/
-	cp $(XHCI_USB_ELF)      $(ISO_ROOT)/Kernel/Driver/
 	cp Kernel/FILE.TXT      $(ISO_ROOT)/FILE.TXT
 	cp Userland/LOGO.PNG    $(ISO_ROOT)/LOGO.PNG
 	dd if=/dev/zero of=$(ESP_IMG) bs=1M count=64
