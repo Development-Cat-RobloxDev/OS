@@ -2,6 +2,8 @@
 #include <efilib.h>
 #include <stdint.h>
 
+#include "../Kernel/Drivers/DriverModuleIds.h"
+
 #define CHECK(st, msg) \
     if (EFI_ERROR(st)) { Print(L"%s: %r\n", msg, st); return st; }
 
@@ -13,6 +15,8 @@ typedef uint64_t EFI_PHYSICAL_ADDRESS;
 #define MAX_LOADED_FILES 8
 
 typedef struct {
+    UINT32 Id;
+    UINT32 Reserved;
     EFI_PHYSICAL_ADDRESS PhysAddr;
     uint64_t Size;
 } LOADED_FILE;
@@ -60,6 +64,12 @@ typedef struct {
     uint64_t p_memsz;
     uint64_t p_align;
 } Elf64_Phdr;
+
+typedef struct {
+    UINT32 Id;
+    const CHAR16 *Path;
+    BOOLEAN Required;
+} PRELOAD_FILE_SPEC;
 
 EFI_STATUS LoadFileToMemory(
     EFI_SYSTEM_TABLE *ST,
@@ -119,16 +129,25 @@ EFI_STATUS LoadFileToMemory(
 EFI_STATUS LoadKernelELF(
     EFI_SYSTEM_TABLE *ST,
     VOID *KernelImage,
+    UINTN KernelImageSize,
     UINT64 *EntryPoint
 )
 {
     Elf64_Ehdr *Ehdr = (Elf64_Ehdr*)KernelImage;
 
+    // ELFヘッダシグネチャ検証
     if (Ehdr->e_ident[0] != 0x7F ||
         Ehdr->e_ident[1] != 'E'  ||
         Ehdr->e_ident[2] != 'L'  ||
         Ehdr->e_ident[3] != 'F')
         return EFI_LOAD_ERROR;
+
+    // プログラムヘッダテーブルのオフセット検証
+    if (Ehdr->e_phoff >= KernelImageSize ||
+        Ehdr->e_phoff + (Ehdr->e_phnum * sizeof(Elf64_Phdr)) > KernelImageSize) {
+        Print(L"[LOADER] Invalid program header table offset\n");
+        return EFI_LOAD_ERROR;
+    }
 
     Elf64_Phdr *Phdrs =
         (Elf64_Phdr*)((UINT8*)KernelImage + Ehdr->e_phoff);
@@ -137,6 +156,30 @@ EFI_STATUS LoadKernelELF(
         Elf64_Phdr *Ph = &Phdrs[i];
         if (Ph->p_type != PT_LOAD)
             continue;
+
+        // ファイルオフセット検証：イメージ内に存在するか確認
+        if (Ph->p_offset >= KernelImageSize) {
+            Print(L"[LOADER] Segment %lu: offset out of bounds\n", i);
+            return EFI_LOAD_ERROR;
+        }
+
+        // ファイルサイズ検証：オフセット + サイズがイメージを超えないか確認
+        if (Ph->p_offset + Ph->p_filesz > KernelImageSize) {
+            Print(L"[LOADER] Segment %lu: file size exceeds image boundary\n", i);
+            return EFI_LOAD_ERROR;
+        }
+
+        // メモリサイズ検証：妥当な値か確認
+        if (Ph->p_memsz < Ph->p_filesz) {
+            Print(L"[LOADER] Segment %lu: memsz < filesz\n", i);
+            return EFI_LOAD_ERROR;
+        }
+
+        // オーバーフロー検出：p_filesz + p_offset がオーバーフローしないか確認
+        if (Ph->p_filesz > KernelImageSize - Ph->p_offset) {
+            Print(L"[LOADER] Segment %lu: arithmetic overflow detected\n", i);
+            return EFI_LOAD_ERROR;
+        }
 
         EFI_PHYSICAL_ADDRESS Addr =
             (EFI_PHYSICAL_ADDRESS)Ph->p_paddr;
@@ -152,23 +195,126 @@ EFI_STATUS LoadKernelELF(
             Pages,
             &Addr
         );
-        if (EFI_ERROR(Status))
+        if (EFI_ERROR(Status)) {
+            Print(L"[LOADER] Failed to allocate pages for segment %lu\n", i);
             return Status;
+        }
 
+        // すべての検証が完了してからコピー実行
         CopyMem(
             (VOID*)Ph->p_paddr,
             (UINT8*)KernelImage + Ph->p_offset,
             Ph->p_filesz
         );
 
+        // BSS領域をゼロクリア
         SetMem(
             (VOID*)(Ph->p_paddr + Ph->p_filesz),
             Ph->p_memsz - Ph->p_filesz,
             0
         );
+
+        Print(L"[LOADER] Loaded segment %lu: %lu bytes\n", i, Ph->p_filesz);
     }
 
     *EntryPoint = Ehdr->e_entry;
+    return EFI_SUCCESS;
+}
+
+static EFI_STATUS LoadDriverModuleFile(
+    EFI_SYSTEM_TABLE *ST,
+    EFI_FILE_PROTOCOL *Root,
+    const PRELOAD_FILE_SPEC *Spec,
+    BOOT_INFO *BootInfo
+)
+{
+    if (ST == NULL || Root == NULL || Spec == NULL || BootInfo == NULL) {
+        return EFI_INVALID_PARAMETER;
+    }
+
+    EFI_FILE_PROTOCOL *File = NULL;
+    EFI_STATUS Status = uefi_call_wrapper(
+        Root->Open,
+        5,
+        Root,
+        &File,
+        (CHAR16 *)Spec->Path,
+        EFI_FILE_MODE_READ,
+        0
+    );
+
+    if (EFI_ERROR(Status)) {
+        if (!Spec->Required) {
+            return EFI_SUCCESS;
+        }
+        Print(L"[LOADER] required module open failed: %s (%r)\n",
+              Spec->Path,
+              Status);
+        return Status;
+    }
+
+    VOID *Buffer = NULL;
+    UINTN Size = 0;
+    Status = LoadFileToMemory(ST, File, &Buffer, &Size);
+    uefi_call_wrapper(File->Close, 1, File);
+    if (EFI_ERROR(Status)) {
+        if (!Spec->Required) {
+            return EFI_SUCCESS;
+        }
+        Print(L"[LOADER] required module read failed: %s (%r)\n",
+              Spec->Path,
+              Status);
+        return Status;
+    }
+
+    // バッファサイズ検証
+    if (Size == 0) {
+        if (!Spec->Required) {
+            return EFI_SUCCESS;
+        }
+        Print(L"[LOADER] required module is empty: %s\n", Spec->Path);
+        return EFI_LOAD_ERROR;
+    }
+
+    if (BootInfo->LoadedFileCount >= MAX_LOADED_FILES) {
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    UINTN idx = BootInfo->LoadedFileCount++;
+    BootInfo->LoadedFiles[idx].Id = Spec->Id;
+    BootInfo->LoadedFiles[idx].Reserved = 0;
+    BootInfo->LoadedFiles[idx].PhysAddr =
+        (EFI_PHYSICAL_ADDRESS)(UINTN)Buffer;
+    BootInfo->LoadedFiles[idx].Size = (uint64_t)Size;
+
+    Print(L"[LOADER] module loaded: %s (%u bytes)\n", Spec->Path, (UINT32)Size);
+    return EFI_SUCCESS;
+}
+
+static EFI_STATUS PreloadDriverModules(
+    EFI_SYSTEM_TABLE *ST,
+    EFI_FILE_PROTOCOL *Root,
+    BOOT_INFO *BootInfo
+)
+{
+    static PRELOAD_FILE_SPEC Specs[] = {
+        { DRIVER_MODULE_ID_PCI, L"\\Kernel\\Driver\\PCI_Driver.ELF", TRUE },
+        { DRIVER_MODULE_ID_FAT32, L"\\Kernel\\Driver\\FAT32_Driver.ELF", TRUE },
+        { DRIVER_MODULE_ID_PS2, L"\\Kernel\\Driver\\PS2_Driver.ELF", TRUE },
+        { DRIVER_MODULE_ID_DISPLAY_VIRTIO, L"\\Kernel\\Driver\\VirtIO_Driver.ELF", FALSE },
+        { DRIVER_MODULE_ID_DISPLAY_INTEL_UHD_9TH, L"\\Kernel\\Driver\\Intel_UHD_Graphics_9TH_Driver.ELF", FALSE },
+        { DRIVER_MODULE_ID_DISPLAY_IMPLUS_DISPLAY_GENERIC_DRIVER, L"\\Kernel\\Driver\\ImplusOS_Generic_Display_Driver.ELF", FALSE },
+    };
+
+    BootInfo->LoadedFileCount = 0;
+
+    for (UINTN i = 0; i < (sizeof(Specs) / sizeof(Specs[0])); ++i) {
+        EFI_STATUS Status = LoadDriverModuleFile(ST, Root, &Specs[i], BootInfo);
+        if (EFI_ERROR(Status)) {
+            return Status;
+        }
+    }
+
     return EFI_SUCCESS;
 }
 
@@ -332,13 +478,19 @@ EFI_STATUS EFIAPI efi_main(
         &KernelSize
     );
     CHECK(Status, L"Read Kernel");
+    uefi_call_wrapper(KernelFile->Close, 1, KernelFile);
 
+    // カーネルイメージサイズをLoadKernelELFに渡す
     Status = LoadKernelELF(
         ST,
         KernelBuffer,
+        KernelSize,
         &KernelEntry
     );
     CHECK(Status, L"ELF Load");
+
+    Status = PreloadDriverModules(ST, Root, &BootInfo);
+    CHECK(Status, L"Preload Drivers");
 
     Print(L"[LOADER] Jumping to kernel\n");
 

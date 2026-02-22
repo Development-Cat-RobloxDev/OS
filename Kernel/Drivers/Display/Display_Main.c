@@ -9,16 +9,10 @@ bool display_init(void) {
     g_active_display_driver = NULL;
 
     driver_select_register_binary_display_drivers();
-    const display_driver_t *selected = driver_select_pick_display_driver();
-    if (!selected) {
+    g_active_display_driver = driver_select_pick_display_driver();
+    if (!g_active_display_driver) {
         return false;
     }
-
-    if (!selected->init()) {
-        return false;
-    }
-
-    g_active_display_driver = selected;
     return true;
 }
 

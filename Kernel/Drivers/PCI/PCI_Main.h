@@ -22,6 +22,14 @@ typedef struct {
     uint32_t bar[6];
 } pci_device_t;
 
+typedef struct {
+    uint32_t (*read_config)(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset);
+    void (*write_config)(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset, uint32_t value);
+    void (*scan_bus)(void);
+    int (*find_device)(uint16_t vendor_id, uint16_t device_id, pci_device_t *out_device);
+    uint32_t (*read_bar)(uint8_t bus, uint8_t device, uint8_t func, uint8_t bar_index);
+} pci_driver_t;
+
 uint32_t pci_read_config(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset);
 void pci_write_config(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset, uint32_t value);
 

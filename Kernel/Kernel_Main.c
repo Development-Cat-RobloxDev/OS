@@ -5,7 +5,10 @@
 #include "GDT/GDT_Main.h"
 #include "IO/IO_Main.h"
 #include "Drivers/FileSystem/FAT32/FAT32_Main.h"
+#include "Drivers/DriverModule.h"
+#include "Drivers/DriverSelect.h"
 #include "Drivers/Display/Display_Main.h"
+#include "Drivers/PS2/PS2_Input.h"
 #include "ELF/ELF_Loader.h"
 #include "Syscall/Syscall_Main.h"
 #include "Syscall/Syscall_File.h"
@@ -23,8 +26,6 @@
 #define GDT_TSS              0x30
 
 #define USER_ELF_MAX_SIZE (2ULL * 1024ULL * 1024ULL)
-#define USER_ELF_VADDR_MIN 0x00400000ULL
-#define USER_ELF_VADDR_MAX 0x08000000ULL
 
 static uint64_t user_entry = 0;
 
@@ -74,13 +75,11 @@ void all_fs_initialize() {
 static bool load_userland_elf(uint64_t *entry_out) {
     elf_load_policy_t policy = {
         .max_file_size = USER_ELF_MAX_SIZE,
-        .min_vaddr = USER_ELF_VADDR_MIN,
-        .max_vaddr = USER_ELF_VADDR_MAX,
+        .min_vaddr = USER_CODE_BASE,
+        .max_vaddr = USER_CODE_LIMIT,
     };
     return elf_loader_load_from_path("Userland/Userland.ELF", &policy, entry_out);
 }
-
-// Kernel/Kernel_Main.c
 
 __attribute__((noreturn))
 void entry_user_mode() {
@@ -117,6 +116,17 @@ __attribute__((noreturn))
 void kernel_main(BOOT_INFO *boot_info) {
     serial_init();
     serial_write_string("\n[OS] ===== Kernel Starting =====\n");
+
+    driver_module_manager_init(boot_info);
+    display_boot_framebuffer_t boot_fb = {
+        .addr = (void *)(uintptr_t)boot_info->FrameBufferBase,
+        .size_bytes = boot_info->FrameBufferSize,
+        .width = boot_info->HorizontalResolution,
+        .height = boot_info->VerticalResolution,
+        .pixels_per_scan_line = boot_info->PixelsPerScanLine,
+        .bytes_per_pixel = 4,
+    };
+    driver_select_set_boot_framebuffer(&boot_fb);
     
     serial_write_string("[OS] Initializing physical memory...\n");
     init_physical_memory(
@@ -126,7 +136,7 @@ void kernel_main(BOOT_INFO *boot_info) {
     );
 
     serial_write_string("[OS] Initializing paging...\n");
-    init_paging(boot_info->FrameBufferBase, boot_info->FrameBufferSize);
+    init_paging();
 
     serial_write_string("[OS] Initializing memory manager...\n");
     memory_init();
@@ -139,11 +149,14 @@ void kernel_main(BOOT_INFO *boot_info) {
 
     serial_write_string("[OS] Initializing file system...\n");
     all_fs_initialize();
-    
+
     serial_write_string("[OS] Initializing display...\n");
     if (!display_init()) {
         serial_write_string("[OS] [WARN] Display init failed\n");
     }
+
+    serial_write_string("[OS] Initializing PS/2 input...\n");
+    ps2_input_init();
     
     serial_write_string("[OS] Initializing syscall...\n");
     syscall_init(); 

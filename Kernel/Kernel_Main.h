@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "Drivers/DriverModuleIds.h"
+
 typedef uint64_t UINTN;
 typedef uint32_t UINT32;
 
@@ -21,6 +23,8 @@ typedef struct {
 } EFI_MEMORY_DESCRIPTOR;
 
 typedef struct {
+    UINT32 Id;
+    UINT32 Reserved;
     EFI_PHYSICAL_ADDRESS PhysAddr;
     uint64_t Size;
 } LOADED_FILE;

@@ -13,7 +13,6 @@
 #endif
 #define DMA_MIN_ALIGN   64u
 #define DMA_MAX_BLOCKS  512u
-#define PAGE_SIZE       4096u
 #ifndef VIRT_TO_PHYS_OFFSET
 #define VIRT_TO_PHYS_OFFSET  0ULL
 #endif

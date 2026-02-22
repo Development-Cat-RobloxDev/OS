@@ -102,6 +102,43 @@ static paging_space_t *find_free_space_slot(void)
     return NULL;
 }
 
+static int pd_table_has_user_pages(const uint64_t *pd_table)
+{
+    for (uint32_t i = 0; i < 512; ++i) {
+        if ((pd_table[i] & PAGE_PRESENT) != 0 &&
+            (pd_table[i] & PAGE_USER) != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int update_pdpt_user_flag(uint64_t cr3,
+                                 uint64_t pdpt_index,
+                                 uint64_t *pd_table)
+{
+    if (pdpt_index >= g_required_entries || pd_table == NULL) {
+        return -1;
+    }
+
+    uint64_t flags = PAGE_PRESENT | PAGE_RW;
+    if (pd_table_has_user_pages(pd_table)) {
+        flags |= PAGE_USER;
+    }
+
+    if (cr3 == (uint64_t)g_kernel_pml4) {
+        g_kernel_pdpt[pdpt_index] = ((uint64_t)pd_table) | flags;
+        return 0;
+    }
+
+    paging_space_t *space = find_space_by_cr3(cr3);
+    if (space == NULL) {
+        return -1;
+    }
+    space->pdpt[pdpt_index] = ((uint64_t)pd_table) | flags;
+    return 0;
+}
+
 static uint64_t *resolve_pd_table(uint64_t cr3, uint64_t pdpt_index)
 {
     if (pdpt_index >= g_required_entries) {
@@ -159,7 +196,7 @@ void *map_mmio_virt(uint64_t phys_addr)
     return (void *)(uintptr_t)(virt_base + offset);
 }
 
-void init_paging(uint64_t framebuffer_base, uint32_t framebuffer_size)
+void init_paging(void)
 {
     serial_write_string("[OS] [Memory] Start Initialize Paging.\n");
 
@@ -169,16 +206,8 @@ void init_paging(uint64_t framebuffer_base, uint32_t framebuffer_size)
     memset(g_mmio_phys_base, 0, sizeof(g_mmio_phys_base));
     memset(g_process_spaces, 0, sizeof(g_process_spaces));
     g_mmio_slots_used = 0;
-
-    uint64_t fb_end = framebuffer_base + framebuffer_size;
-    uint64_t min_required = 4ULL * GB;
-    uint64_t max_addr = (fb_end > min_required) ? fb_end : min_required;
-
-    g_required_entries = (max_addr + GB - 1) / GB;
-    if (g_required_entries > MAX_PDPT_ENTRIES) {
-        serial_write_string("[OS] [Memory] Warning: mapping limited to MAX_PDPT_ENTRIES.\n");
-        g_required_entries = MAX_PDPT_ENTRIES;
-    }
+    
+    g_required_entries = 4;
 
     serial_write_string("[OS] [Memory] Mapping ");
     serial_write_uint64(g_required_entries);
@@ -220,7 +249,11 @@ uint64_t paging_create_process_space(void)
 
     space->pml4 = alloc_zeroed_page_table();
     space->pdpt = alloc_zeroed_page_table();
-    if (!space->pml4 || !space->pdpt) return 0;
+    if (!space->pml4 || !space->pdpt) {
+        kfree(space->pml4);
+        kfree(space->pdpt);
+        return 0;
+    }
     
     copy_page_entries(space->pml4, g_kernel_pml4);
     copy_page_entries(space->pdpt, g_kernel_pdpt);
@@ -229,11 +262,18 @@ uint64_t paging_create_process_space(void)
 
     for (uint64_t i = 0; i < g_required_entries; ++i) {
         space->pd_tables[i] = alloc_zeroed_page_table();
-        if (space->pd_tables[i] == NULL) return 0;
+        if (space->pd_tables[i] == NULL) {
+            for (uint64_t j = 0; j < i; ++j) {
+                kfree(space->pd_tables[j]);
+            }
+            kfree(space->pml4);
+            kfree(space->pdpt);
+            return 0;
+        }
 
         copy_page_entries(space->pd_tables[i], g_kernel_pd[i]);
         
-        space->pdpt[i] = ((uint64_t)space->pd_tables[i]) | PAGE_PRESENT | PAGE_RW | PAGE_USER;
+        space->pdpt[i] = ((uint64_t)space->pd_tables[i]) | PAGE_PRESENT | PAGE_RW;
     }
 
     space->cr3 = (uint64_t)space->pml4;
@@ -313,6 +353,9 @@ int paging_set_user_access(uint64_t cr3,
             pde &= ~PAGE_USER;
 
         pd_table[pd_index] = pde;
+        if (update_pdpt_user_flag(cr3, pdpt_index, pd_table) < 0) {
+            return -1;
+        }
     }
 
     if (read_cr3() == cr3)
@@ -348,6 +391,7 @@ void paging_map_user_page(uint64_t cr3,
         pml4[i4] = ((uint64_t)pdpt)
                     | PAGE_PRESENT | PAGE_RW | PAGE_USER;
     }
+    pml4[i4] |= PAGE_USER;
     pdpt = (uint64_t*)(pml4[i4] & PAGE_MASK);
 
     if (!(pdpt[i3] & PAGE_PRESENT)) {
@@ -356,6 +400,7 @@ void paging_map_user_page(uint64_t cr3,
         pdpt[i3] = ((uint64_t)pd)
                     | PAGE_PRESENT | PAGE_RW | PAGE_USER;
     }
+    pdpt[i3] |= PAGE_USER;
     pd = (uint64_t*)(pdpt[i3] & PAGE_MASK);
 
     if (!(pd[i2] & PAGE_PRESENT)) {
@@ -364,6 +409,7 @@ void paging_map_user_page(uint64_t cr3,
         pd[i2] = ((uint64_t)pt)
                   | PAGE_PRESENT | PAGE_RW | PAGE_USER;
     }
+    pd[i2] |= PAGE_USER;
     pt = (uint64_t*)(pd[i2] & PAGE_MASK);
 
     pt[i1] = (phys_addr & PAGE_MASK)

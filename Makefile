@@ -19,8 +19,12 @@ KERNEL_ELF        := $(BUILD_DIR)/Kernel/Kernel_Main.ELF
 BOOTX64_EFI       := $(BUILD_DIR)/Loader/BOOTX64.EFI
 USERLAND_INIT_ELF := $(BUILD_DIR)/Userland/Userland.ELF
 USERLAND_APP_ELF  := $(BUILD_DIR)/Userland/SystemApps/UserApp.ELF
+PCI_DRIVER_ELF    := $(BUILD_DIR)/Kernel/Drivers/PCI_Driver.ELF
+FAT32_DRIVER_ELF  := $(BUILD_DIR)/Kernel/Drivers/FAT32_Driver.ELF
+PS2_DRIVER_ELF    := $(BUILD_DIR)/Kernel/Drivers/PS2_Driver.ELF
 VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Kernel/Drivers/Display/VirtIO_Driver.ELF
 INTEL_DRIVER_ELF  := $(BUILD_DIR)/Kernel/Drivers/Display/Intel_UHD_Graphics_9TH_Driver.ELF
+GENERIC_DISPLAY_DRIVER_ELF := $(BUILD_DIR)/Kernel/Drivers/Display/ImplusOS_Generic_Display_Driver.ELF
 
 KERNEL_CFLAGS := \
 	-IKernel -IThirdParty \
@@ -51,9 +55,13 @@ USERLAND_CXXFLAGS := \
 	-fno-exceptions -fno-rtti \
 	-Wall -Wextra -MMD -MP
 
-DRIVER_MODULE_CFLAGS  := $(KERNEL_CFLAGS) -DIMPLUS_DRIVER_MODULE
-VIRTIO_DRIVER_LDFLAGS := -T Kernel/Drivers/Display/VirtIO/VirtIO_Module.ld -nostdlib --build-id=none
-INTEL_DRIVER_LDFLAGS  := -T Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Module.ld -nostdlib --build-id=none
+DRIVER_MODULE_CFLAGS := \
+	-IKernel -IThirdParty \
+	-ffreestanding -fno-stack-protector -fPIC -fno-builtin \
+	-mno-red-zone -nostdlib -nostartfiles -nodefaultlibs \
+	-Wall -Wextra -MMD -MP \
+	-DIMPLUS_DRIVER_MODULE
+DRIVER_MODULE_LDFLAGS := -nostdlib -shared -Wl,--build-id=none -Wl,-Bsymbolic -Wl,-e,driver_module_init
 
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
@@ -65,10 +73,12 @@ KERNEL_C_SRCS := \
 	Kernel/IO/IO_Main.c \
 	Kernel/GDT/GDT_Main.c \
 	Kernel/ELF/ELF_Loader.c \
-	Kernel/Drivers/FileSystem/FAT32/FAT32_Main.c \
+	Kernel/Drivers/DriverModule.c \
+	Kernel/Drivers/FileSystem/FAT32/FAT32_Client.c \
 	Kernel/Drivers/DriverSelect.c \
 	Kernel/Drivers/Display/Display_Main.c \
-	Kernel/Drivers/PCI/PCI_Main.c \
+	Kernel/Drivers/PS2/PS2_Client.c \
+	Kernel/Drivers/PCI/PCI_Client.c \
 	Kernel/ProcessManager/ProcessManager_Create.c \
 	Kernel/WindowManager/WindowManager.c \
 	Kernel/Syscall/Syscall_Init.c \
@@ -95,16 +105,23 @@ KERNEL_OBJS       := $(KERNEL_C_SRCS:%.c=$(BUILD_DIR)/%.o) \
 USERLAND_INIT_OBJS := $(USERLAND_C_SRCS:%.c=$(BUILD_DIR)/%.o)
 USERLAND_APP_OBJS  := $(USERLAND_APP_C_SRCS:%.c=$(BUILD_DIR)/%.o)
 DRIVER_MODULE_OBJS := \
+	$(BUILD_DIR)/Modules/PCI_Module.o \
+	$(BUILD_DIR)/Modules/FAT32_Module.o \
+	$(BUILD_DIR)/Modules/PS2_Module.o \
 	$(BUILD_DIR)/Modules/VirtIO_Module.o \
-	$(BUILD_DIR)/Modules/Intel_Module.o
+	$(BUILD_DIR)/Modules/Intel_Module.o \
+	$(BUILD_DIR)/Modules/ImplusOS_Generic_Display_Driver.o \
 
 all: $(BOOTX64_EFI) \
      $(KERNEL_ELF) \
      $(USERLAND_INIT_ELF) \
      $(USERLAND_APP_ELF) \
+     $(PCI_DRIVER_ELF) \
+     $(FAT32_DRIVER_ELF) \
+     $(PS2_DRIVER_ELF) \
      $(VIRTIO_DRIVER_ELF) \
-     $(INTEL_DRIVER_ELF)
-
+     $(INTEL_DRIVER_ELF) \
+     $(GENERIC_DISPLAY_DRIVER_ELF)
 
 $(BUILD_DIR)/Loader/Loader.o: BootLoader/Loader.c
 	mkdir -p $(dir $@)
@@ -153,6 +170,18 @@ $(USERLAND_APP_ELF): $(USERLAND_APP_OBJS)
 	mkdir -p $(dir $@)
 	$(LD) $(USERLAND_APP_LDFLAGS) $^ -o $@
 
+$(BUILD_DIR)/Modules/PCI_Module.o: Kernel/Drivers/PCI/PCI_Main.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/Modules/FAT32_Module.o: Kernel/Drivers/FileSystem/FAT32/FAT32_Main.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/Modules/PS2_Module.o: Kernel/Drivers/PS2/PS2_Input.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/Modules/VirtIO_Module.o: Kernel/Drivers/Display/VirtIO/VirtIO.c
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
@@ -161,13 +190,33 @@ $(BUILD_DIR)/Modules/Intel_Module.o: Kernel/Drivers/Display/Intel_UHD_Graphics_9
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/Modules/ImplusOS_Generic_Display_Driver.o: Kernel/Drivers/Display/ImplusOS_Generic/ImplusOS_Generic.c
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
+
+$(PCI_DRIVER_ELF): $(BUILD_DIR)/Modules/PCI_Module.o
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
+
+$(FAT32_DRIVER_ELF): $(BUILD_DIR)/Modules/FAT32_Module.o
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
+
+$(PS2_DRIVER_ELF): $(BUILD_DIR)/Modules/PS2_Module.o
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
+
 $(VIRTIO_DRIVER_ELF): $(BUILD_DIR)/Modules/VirtIO_Module.o
 	mkdir -p $(dir $@)
-	$(LD) $(VIRTIO_DRIVER_LDFLAGS) $^ -o $@
+	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
 
 $(INTEL_DRIVER_ELF): $(BUILD_DIR)/Modules/Intel_Module.o
 	mkdir -p $(dir $@)
-	$(LD) $(INTEL_DRIVER_LDFLAGS) $^ -o $@
+	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
+
+$(GENERIC_DISPLAY_DRIVER_ELF): $(BUILD_DIR)/Modules/ImplusOS_Generic_Display_Driver.o
+	mkdir -p $(dir $@)
+	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
 
 image: all
 	mkdir -p $(IMAGE_DIR)
@@ -185,8 +234,12 @@ image: all
 		sudo cp $(USERLAND_INIT_ELF) /mnt/Userland/Userland.ELF; \
 		sudo cp $(USERLAND_APP_ELF) /mnt/Userland/SystemApps/UserApp.ELF; \
 		sudo mkdir -p /mnt/Kernel/Driver; \
+		sudo cp $(PCI_DRIVER_ELF) /mnt/Kernel/Driver/; \
+		sudo cp $(FAT32_DRIVER_ELF) /mnt/Kernel/Driver/; \
+		sudo cp $(PS2_DRIVER_ELF) /mnt/Kernel/Driver/; \
 		sudo cp $(VIRTIO_DRIVER_ELF) /mnt/Kernel/Driver/; \
 		sudo cp $(INTEL_DRIVER_ELF) /mnt/Kernel/Driver/; \
+		sudo cp $(GENERIC_DISPLAY_DRIVER_ELF) /mnt/Kernel/Driver/; \
 		sudo cp Kernel/FILE.TXT /mnt/FILE.TXT; \
 		sudo cp Userland/LOGO.PNG /mnt/LOGO.PNG; \
 		sync; \
@@ -207,8 +260,12 @@ image_esp: all
 	cp $(KERNEL_ELF)  $(ISO_ROOT)/Kernel/Kernel_Main.ELF
 	cp $(USERLAND_INIT_ELF) $(ISO_ROOT)/Userland/Userland.ELF
 	cp $(USERLAND_APP_ELF)  $(ISO_ROOT)/Userland/SystemApps/UserApp.ELF
+	cp $(PCI_DRIVER_ELF)    $(ISO_ROOT)/Kernel/Driver/
+	cp $(FAT32_DRIVER_ELF)  $(ISO_ROOT)/Kernel/Driver/
+	cp $(PS2_DRIVER_ELF)    $(ISO_ROOT)/Kernel/Driver/
 	cp $(VIRTIO_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
 	cp $(INTEL_DRIVER_ELF)  $(ISO_ROOT)/Kernel/Driver/
+	cp $(GENERIC_DISPLAY_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/; \
 	cp Kernel/FILE.TXT      $(ISO_ROOT)/FILE.TXT
 	cp Userland/LOGO.PNG    $(ISO_ROOT)/LOGO.PNG
 	dd if=/dev/zero of=$(ESP_IMG) bs=1M count=64
@@ -224,12 +281,10 @@ image_esp: all
 		-eltorito-alt-boot -e esp.iso -no-emul-boot $(ISO_ROOT)
 
 run: image
-	qemu-system-x86_64 -m 512M -vga none -device virtio-vga \
+	qemu-system-x86_64 -m 512M  \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=$(IMAGE) \
-		-serial stdio \
-		-device qemu-xhci -device usb-mouse
-
+		-serial stdio
 clean:
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
 

@@ -705,14 +705,17 @@ bool virtio_gpu_init(void) {
 
     if (!gpu_cmd_resource_create_2d(&controlq, width, height)) {
         serial_write_string("[OS] [VIRTIO] RESOURCE_CREATE_2D failed\n");
+        kfree(fb);
         return false;
     }
     if (!gpu_cmd_resource_attach_backing(&controlq, fb, fb_bytes)) {
         serial_write_string("[OS] [VIRTIO] ATTACH_BACKING failed\n");
+        kfree(fb);
         return false;
     }
     if (!gpu_cmd_set_scanout(&controlq, width, height)) {
         serial_write_string("[OS] [VIRTIO] SET_SCANOUT failed\n");
+        kfree(fb);
         return false;
     }
     serial_write_string("[OS] [VIRTIO] Init complete\n");

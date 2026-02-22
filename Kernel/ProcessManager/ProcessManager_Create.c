@@ -13,9 +13,6 @@
 
 #define PROCESS_MAX_COUNT 16
 #define PROCESS_KERNEL_STACK_SIZE (16 * 1024)
-#define PROCESS_USER_REGION_SIZE (2 * 1024 * 1024)
-#define PROCESS_USER_REGION_PAGES (PROCESS_USER_REGION_SIZE / PAGE_SIZE)
-#define PROCESS_USER_STACK_SIZE (64 * 1024)
 #define PROCESS_USER_ALLOC_MAX 128
 #define PROCESS_RFLAGS_DEFAULT 0x202ULL
 
@@ -26,9 +23,6 @@
 
 #define PROCESS_CONTEXT_QWORDS SYSCALL_FRAME_QWORDS
 #define PROCESS_ELF_MAX_SIZE (2ULL * 1024ULL * 1024ULL)
-#define PROCESS_ELF_VADDR_MIN 0x00400000ULL
-#define PROCESS_ELF_VADDR_MAX 0x08000000ULL
-#define MB2 (2ULL * 1024ULL * 1024ULL)
 
 typedef struct {
     uint8_t used;
@@ -44,12 +38,13 @@ typedef struct {
     uint64_t cr3;
     uint8_t *kernel_stack_base;
     uint64_t kernel_stack_top;
-    uint64_t user_region_base;
-    uint64_t user_region_limit;
-    uint64_t user_heap_cursor;
-    uint64_t user_heap_limit;
     uint64_t user_code_base;
     uint64_t user_code_limit;
+    uint64_t user_heap_base;
+    uint64_t user_heap_cursor;
+    uint64_t user_heap_limit;
+    uint64_t user_stack_base;
+    uint64_t user_stack_top;
     user_alloc_t user_allocs[PROCESS_USER_ALLOC_MAX];
 } process_t;
 
@@ -70,8 +65,8 @@ static uint64_t align_up_u64(uint64_t value, uint64_t align)
 
 static int is_valid_user_entry(uint64_t entry)
 {
-    return (entry >= PROCESS_ELF_VADDR_MIN) &&
-           (entry < PROCESS_ELF_VADDR_MAX);
+    return (entry >= USER_CODE_BASE) &&
+           (entry < USER_CODE_LIMIT);
 }
 
 static void reset_process_slot(process_t *proc)
@@ -83,12 +78,13 @@ static void reset_process_slot(process_t *proc)
     proc->cr3 = 0;
     proc->kernel_stack_base = NULL;
     proc->kernel_stack_top = 0;
-    proc->user_region_base = 0;
-    proc->user_region_limit = 0;
-    proc->user_heap_cursor = 0;
-    proc->user_heap_limit = 0;
     proc->user_code_base = 0;
     proc->user_code_limit = 0;
+    proc->user_heap_base = 0;
+    proc->user_heap_cursor = 0;
+    proc->user_heap_limit = 0;
+    proc->user_stack_base = 0;
+    proc->user_stack_top = 0;
     for (uint32_t i = 0; i < PROCESS_USER_ALLOC_MAX; ++i) {
         proc->user_allocs[i].used = 0;
         proc->user_allocs[i].addr = 0;
@@ -106,17 +102,14 @@ static void release_process_resources(process_t *proc)
         kfree(proc->kernel_stack_base);
         proc->kernel_stack_base = NULL;
     }
-    if (proc->user_region_base != 0) {
-        free_contiguous_pages((void *)(uintptr_t)proc->user_region_base,
-                              PROCESS_USER_REGION_PAGES);
-        proc->user_region_base = 0;
-    }
     proc->kernel_stack_top = 0;
-    proc->user_region_limit = 0;
-    proc->user_heap_cursor = 0;
-    proc->user_heap_limit = 0;
     proc->user_code_base = 0;
     proc->user_code_limit = 0;
+    proc->user_heap_base = 0;
+    proc->user_heap_cursor = 0;
+    proc->user_heap_limit = 0;
+    proc->user_stack_base = 0;
+    proc->user_stack_top = 0;
     for (uint32_t i = 0; i < PROCESS_USER_ALLOC_MAX; ++i) {
         proc->user_allocs[i].used = 0;
         proc->user_allocs[i].addr = 0;
@@ -179,16 +172,49 @@ static int initialize_process_memory(process_t *proc, uint64_t entry)
 
     proc->cr3 = paging_create_process_space();
     if (!proc->cr3) return -1;
-    
-    if (paging_set_user_access(proc->cr3, 0, 0x08000000, 1) < 0) {
+
+    proc->user_code_base = USER_CODE_BASE;
+    proc->user_code_limit = USER_CODE_LIMIT;
+    proc->user_heap_base = USER_HEAP_BASE;
+    proc->user_heap_cursor = USER_HEAP_BASE;
+    proc->user_heap_limit = USER_HEAP_LIMIT;
+    proc->user_stack_base = USER_STACK_BASE;
+    proc->user_stack_top = USER_STACK_TOP;
+
+    if (proc->user_code_limit <= proc->user_code_base ||
+        proc->user_heap_limit <= proc->user_heap_base ||
+        proc->user_stack_top <= proc->user_stack_base ||
+        proc->user_code_limit > proc->user_heap_base ||
+        proc->user_heap_limit > proc->user_stack_base) {
+        serial_write_string("[OS] [PROC] Invalid user layout\n");
         return -1;
     }
 
-    proc->user_region_base = 0;
-    proc->user_region_limit = 0x08000000;
+    if (paging_set_user_access(proc->cr3,
+                               proc->user_code_base,
+                               proc->user_code_limit - proc->user_code_base,
+                               1) < 0) {
+        return -1;
+    }
+    if (paging_set_user_access(proc->cr3,
+                               proc->user_heap_base,
+                               proc->user_heap_limit - proc->user_heap_base,
+                               1) < 0) {
+        return -1;
+    }
+    if (paging_set_user_access(proc->cr3,
+                               proc->user_stack_base,
+                               proc->user_stack_top - proc->user_stack_base,
+                               1) < 0) {
+        return -1;
+    }
 
-    uint64_t user_stack_top = 0x08000000ULL;
+    if (proc->user_heap_limit <= proc->user_heap_cursor) {
+        serial_write_string("[OS] [PROC] User heap/stack collision risk\n");
+        return -1;
+    }
 
+    uint64_t user_stack_top = proc->user_stack_top;
     uint64_t *frame = (uint64_t *)(uintptr_t)(user_stack_top - (PROCESS_CONTEXT_QWORDS * sizeof(uint64_t)));
     for (uint32_t i = 0; i < PROCESS_CONTEXT_QWORDS; ++i) frame[i] = 0;
 
@@ -277,8 +303,8 @@ int32_t process_spawn_user_elf(const char *path)
 
     elf_load_policy_t policy = {
         .max_file_size = PROCESS_ELF_MAX_SIZE,
-        .min_vaddr = PROCESS_ELF_VADDR_MIN,
-        .max_vaddr = PROCESS_ELF_VADDR_MAX,
+        .min_vaddr = USER_CODE_BASE,
+        .max_vaddr = USER_CODE_LIMIT,
     };
     uint64_t entry = 0;
 
@@ -289,7 +315,11 @@ int32_t process_spawn_user_elf(const char *path)
         return -1;
     }
 
-    return process_create_user(entry);
+    int32_t pid = process_create_user(entry);
+    if (pid < 0) {
+        return -1;
+    }
+    return pid;
 }
 
 void process_exit_current(void)
@@ -370,6 +400,35 @@ uint64_t process_schedule_on_syscall(uint64_t current_saved_rsp,
     return next->saved_rsp;
 }
 
+uint64_t process_schedule_after_exit(uint64_t *next_user_rsp_out)
+{
+    if (next_user_rsp_out != NULL) {
+        *next_user_rsp_out = 0;
+    }
+
+    if (g_current_pid < 0 || g_current_pid >= PROCESS_MAX_COUNT) {
+        serial_write_string("[OS] [PROC] Invalid current PID on exit schedule\n");
+        halt_forever();
+    }
+
+    int32_t next_pid = pick_next_ready(g_current_pid);
+    if (next_pid < 0) {
+        serial_write_string("[OS] [PROC] No runnable process after exit. Halting.\n");
+        halt_forever();
+    }
+
+    g_current_pid = next_pid;
+    process_t *next = &g_processes[g_current_pid];
+    next->state = PROCESS_STATE_RUNNING;
+
+    activate_process_context(next);
+
+    if (next_user_rsp_out != NULL) {
+        *next_user_rsp_out = next->saved_user_rsp;
+    }
+    return next->saved_rsp;
+}
+
 int process_user_buffer_is_valid(const void *ptr, uint64_t len)
 {
     if (g_current_pid < 0 || g_current_pid >= PROCESS_MAX_COUNT) {
@@ -386,7 +445,10 @@ int process_user_buffer_is_valid(const void *ptr, uint64_t len)
     if (range_within(addr, len, proc->user_code_base, proc->user_code_limit)) {
         return 1;
     }
-    if (range_within(addr, len, proc->user_region_base, proc->user_region_limit)) {
+    if (range_within(addr, len, proc->user_heap_base, proc->user_heap_limit)) {
+        return 1;
+    }
+    if (range_within(addr, len, proc->user_stack_base, proc->user_stack_top)) {
         return 1;
     }
     return 0;
@@ -422,6 +484,12 @@ void *process_user_alloc(uint32_t size)
     }
 
     process_t *proc = &g_processes[g_current_pid];
+    if (proc->user_heap_base == 0 ||
+        proc->user_heap_limit <= proc->user_heap_base ||
+        proc->user_heap_cursor < proc->user_heap_base ||
+        proc->user_heap_cursor > proc->user_heap_limit) {
+        return NULL;
+    }
     uint64_t alloc_size = align_up_u64((uint64_t)size, 16ULL);
 
     for (uint32_t i = 0; i < PROCESS_USER_ALLOC_MAX; ++i) {

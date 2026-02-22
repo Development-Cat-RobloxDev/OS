@@ -1,12 +1,13 @@
 #include "Memory_Main.h"
 #include "../Serial.h"
 #include "../Kernel_Main.h"
+#include "../ProcessManager/ProcessManager.h"
 #include <stddef.h>
 #include <stdint.h>
 
 #define PAGE_SIZE 4096
 #define MAX_PAGES 262144
-#define USER_RESERVED_TOP 0x08000000ULL
+#define USER_RESERVED_TOP USER_STACK_TOP
 
 static uint8_t page_bitmap[MAX_PAGES];
 

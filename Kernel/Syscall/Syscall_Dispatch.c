@@ -2,6 +2,7 @@
 #include "Syscall_File.h"
 #include "../ProcessManager/ProcessManager.h"
 #include "../Serial.h"
+#include "../Drivers/PS2/PS2_Input.h"
 #include "../WindowManager/WindowManager.h"
 
 #include <stddef.h>
@@ -46,6 +47,8 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
 {
     int request_switch = 0;
     int32_t current_pid = process_get_current_pid();
+
+    ps2_input_poll();
 
     switch (num) {
     
@@ -300,6 +303,30 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
             if (s1[i] != s2[i]) { result = (int)s1[i] - (int)s2[i]; break; }
         }
         set_syscall_result(saved_rsp, (uint64_t)(int64_t)result);
+        break;
+    }
+
+    case SYSCALL_INPUT_READ_KEYBOARD: {
+        ps2_keyboard_event_t *event_out =
+            (ps2_keyboard_event_t *)(uintptr_t)arg1;
+        if (!user_buffer_ok(event_out, sizeof(ps2_keyboard_event_t))) {
+            set_syscall_result(saved_rsp, (uint64_t)-1);
+            break;
+        }
+        int32_t rc = ps2_input_read_keyboard(event_out);
+        set_syscall_result(saved_rsp, (uint64_t)(int64_t)rc);
+        break;
+    }
+
+    case SYSCALL_INPUT_READ_MOUSE: {
+        ps2_mouse_event_t *event_out =
+            (ps2_mouse_event_t *)(uintptr_t)arg1;
+        if (!user_buffer_ok(event_out, sizeof(ps2_mouse_event_t))) {
+            set_syscall_result(saved_rsp, (uint64_t)-1);
+            break;
+        }
+        int32_t rc = ps2_input_read_mouse(event_out);
+        set_syscall_result(saved_rsp, (uint64_t)(int64_t)rc);
         break;
     }
 

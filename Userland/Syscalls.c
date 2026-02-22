@@ -23,6 +23,8 @@
 #define SYSCALL_USER_KFREE        28ULL
 #define SYSCALL_USER_MEMCPY       29ULL
 #define SYSCALL_USER_MEMCMP       30ULL
+#define SYSCALL_INPUT_READ_KEYBOARD 31ULL
+#define SYSCALL_INPUT_READ_MOUSE  32ULL
 
 static inline uint64_t syscall0(uint64_t num)
 {
@@ -163,6 +165,11 @@ void draw_fill_rect(uint32_t x,
     (void)syscall4(SYSCALL_DRAW_FILL_RECT, x, y, packed_wh, color);
 }
 
+void draw_pixel(uint32_t x, uint32_t y, uint32_t color)
+{
+    (void)syscall3(SYSCALL_DRAW_PIXEL, x, y, color);
+}
+
 void draw_present(void)
 {
     (void)syscall0(SYSCALL_DRAW_PRESENT);
@@ -171,4 +178,14 @@ void draw_present(void)
 void process_yield(void)
 {
     (void)syscall0(SYSCALL_PROCESS_YIELD);
+}
+
+int32_t input_read_keyboard(input_keyboard_event_t *event_out)
+{
+    return (int32_t)syscall1(SYSCALL_INPUT_READ_KEYBOARD, (uint64_t)event_out);
+}
+
+int32_t input_read_mouse(input_mouse_event_t *event_out)
+{
+    return (int32_t)syscall1(SYSCALL_INPUT_READ_MOUSE, (uint64_t)event_out);
 }

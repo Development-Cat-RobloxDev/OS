@@ -118,8 +118,6 @@ static uint32_t* load_png(const char* path, ImageSize* out_size) {
 
 void _start(void)
 {
-    uint32_t frame = 0;
-
     serial_write_string("[U][APP] standalone process started\n");
     if (wm_create_window(450, 250) < 0) {
         serial_write_string("[U] Failed to create window\n");
@@ -135,10 +133,35 @@ void _start(void)
         serial_write_string("[U] PNG draw disabled\n");
     }
 
-    while (1) {
-        draw_fill_rect(0, 0, 640, 480, 0xFFFFFFFFu);
+    int32_t cursor_x = 12;
+    int32_t cursor_y = 12;
+    uint8_t mouse_buttons = 0;
 
-        draw_png_image(rgba, &img, 0, 0);
+    draw_fill_rect(0, 0, 640, 480, 0xFFFFFFFFu);
+    draw_png_image(rgba, &img, 0, 0);
+
+    while (1) {
+        input_mouse_event_t mouse_event = {0};
+        while (input_read_mouse(&mouse_event) > 0) {
+            cursor_x = (int32_t)mouse_event.x;
+            cursor_y = (int32_t)mouse_event.y;
+            mouse_buttons = mouse_event.buttons;
+        }
+
+        input_keyboard_event_t key_event = {0};
+        while (input_read_keyboard(&key_event) > 0) {
+            if (key_event.pressed &&
+                (key_event.ascii == 'r' || key_event.ascii == 'R')) {
+                cursor_x = 12;
+                cursor_y = 12;
+            }
+        }
+
+        draw_fill_rect((uint32_t)cursor_x,
+                       (uint32_t)cursor_y,
+                       8,
+                       8,
+                       (mouse_buttons & 0x1u) ? 0xFFFF4040u : 0xFF2060FFu);
 
         draw_present();
         process_yield();

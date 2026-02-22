@@ -12,6 +12,8 @@ static isr_t irq_routines[MAX_IRQS] = {0};
 extern void isr_default(void);
 extern void isr_page_fault(void);
 extern void load_idt(IDT_Ptr* idt_ptr);
+extern void page_fault_resume_user(uint64_t next_saved_rsp,
+                                   uint64_t next_user_rsp);
 
 void register_interrupt_handler(uint16_t irq, isr_t handler) {
     if (irq < MAX_IRQS) {
@@ -102,16 +104,30 @@ void page_fault_handler(uint64_t error_code, uint64_t rip, uint64_t rsp, uint64_
     serial_write_string((error_code & PF_INSTR) ? "yes" : "no");
     serial_write_string("\n");
 
-    if (error_code & PF_USER) {
-        int32_t pid = process_get_current_pid();
-        serial_write_string("[OS] [PF] Invalid user memory access. pid=");
+    int32_t pid = process_get_current_pid();
+    if ((error_code & PF_USER) && pid >= 0) {
+        serial_write_string("[OS] [PF] Terminating process pid=");
         serial_write_uint32((uint32_t)pid);
-        serial_write_string("\n");
+        serial_write_string(" (mode=user)\n");
+
         process_exit_current();
-    } else {
-        serial_write_string("[OS] [PF] Kernel memory fault\n");
+
+        uint64_t next_user_rsp = 0;
+        uint64_t next_saved_rsp = process_schedule_after_exit(&next_user_rsp);
+
+        int32_t next_pid = process_get_current_pid();
+        serial_write_string("[OS] [PF] Switched to pid=");
+        serial_write_uint32((uint32_t)next_pid);
+        serial_write_string("\n");
+
+        page_fault_resume_user(next_saved_rsp, next_user_rsp);
     }
 
+    if (pid >= 0) {
+        serial_write_string("[OS] [PF] Kernel-mode page fault. Halting kernel.\n");
+    } else {
+        serial_write_string("[OS] [PF] No active process context. Halting kernel.\n");
+    }
     while (1) {
         __asm__("hlt");
     }
