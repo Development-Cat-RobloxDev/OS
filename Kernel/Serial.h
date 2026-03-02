@@ -9,5 +9,7 @@ void serial_write_string(const char *str);
 void serial_write_uint64(uint64_t value);
 void serial_write_uint32(uint32_t value);
 void serial_write_uint16(uint16_t value);
+void serial_write_uint8(uint8_t value);
+void serial_write_dec16(uint16_t v);
 
 #endif

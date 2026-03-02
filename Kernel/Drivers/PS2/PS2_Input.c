@@ -12,8 +12,12 @@
 #ifdef IMPLUS_DRIVER_MODULE
 static const driver_kernel_api_t *g_driver_api = NULL;
 
-#define inb g_driver_api->inb
+static void ps2_noop_log(const char *s) { (void)s; }
+static void (*ps2_log_fn)(const char *) = ps2_noop_log;
+
+#define inb  g_driver_api->inb
 #define outb g_driver_api->outb
+#define serial_write_string ps2_log_fn
 #endif
 
 #define PS2_DATA_PORT    0x60
@@ -519,16 +523,12 @@ bool ps2_input_init(void)
 
     config &= (uint8_t)~(PS2_CONFIG_IRQ_PORT1 | PS2_CONFIG_IRQ_PORT2);
     config |= PS2_CONFIG_TRANSLATION;
-    if (controller_write_config(config) < 0) {
-        serial_write_string("[OS] [PS2] Failed to write controller config\n");
-        return false;
-    }
-
     if (controller_write_command(PS2_CMD_SELF_TEST) == 0) {
         uint8_t self_test = 0;
         if (controller_read_data(&self_test) == 0 && self_test != PS2_SELF_OK) {
             serial_write_string("[OS] [PS2] Controller self-test failed\n");
         }
+        controller_write_config(config);
     }
 
     port1_ok = (controller_test_port(PS2_CMD_TEST_PORT1) == 0) ? 1 : 0;
@@ -586,8 +586,7 @@ void ps2_input_poll(void)
                 continue;
             }
 
-            if ((value & 0x08u) == 0u) {
-                g_mouse_packet_index = 0;
+            if (g_mouse_packet_index == 0u && (value & 0x08u) == 0u) {
                 continue;
             }
 
@@ -716,13 +715,10 @@ const ps2_input_driver_t *driver_module_init(const driver_kernel_api_t *api)
     }
 
     g_driver_api = api;
-
-    if (g_driver_api->serial_write_string == NULL) {
-        g_driver_api = api;
-        #define serial_write_string fallback_serial_write_string
-    } else {
-        #define serial_write_string g_driver_api->serial_write_string
-    }
+    
+    ps2_log_fn = (api->serial_write_string != NULL)
+                     ? api->serial_write_string
+                     : ps2_noop_log;
 
     return &g_ps2_input_driver;
 }

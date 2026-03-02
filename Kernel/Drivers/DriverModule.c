@@ -98,6 +98,9 @@ bool driver_module_manager_load(driver_module_id_t id,
 
     module_state_t *state = &g_modules[id];
     if (!state->present || state->file_data == NULL || state->file_size == 0) {
+        serial_write_uint64(state->present);
+        serial_write_uint64(state->file_data);
+        serial_write_uint64(state->file_size);
         return false;
     }
 
@@ -123,5 +126,6 @@ bool driver_module_manager_load(driver_module_id_t id,
     state->loaded = 1;
     state->entry = entry;
     *entry_out = entry;
+
     return true;
 }

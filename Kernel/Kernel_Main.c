@@ -21,13 +21,6 @@
 
 #define COM1_PORT 0x3F8
 
-#define GDT_KERNEL_CODE 0x08
-#define GDT_KERNEL_DATA 0x10
-#define GDT_USER_COMPAT_CODE 0x18
-#define GDT_USER_DATA        0x20
-#define GDT_USER_CODE        0x28
-#define GDT_TSS              0x30
-
 #define USER_ELF_MAX_SIZE (2ULL * 1024ULL * 1024ULL)
 
 static uint64_t user_entry = 0;
@@ -69,6 +62,18 @@ void serial_write_uint32(uint32_t value) {
 
 void serial_write_uint16(uint16_t value) {
     serial_write_uint64((uint64_t)value);
+}
+
+void serial_write_uint8(uint8_t value) {
+    serial_write_uint64((uint64_t)value);
+}
+
+void serial_write_dec16(uint16_t v) {
+    char buf[6];
+    int i = 5;
+    buf[i] = '\0';
+    if (v == 0) { return; }
+    while (v > 0 && i > 0) { buf[--i] = '0' + (v % 10); v /= 10; }
 }
 
 void all_fs_initialize() {
