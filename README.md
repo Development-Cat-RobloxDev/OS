@@ -72,3 +72,7 @@ make run
 
 ## License
 MIT.
+
+## Thirdparty
+- This repository is using thridparty code.
+  - `Kernel/ThirdParty`
