@@ -5,7 +5,7 @@
 #include "../IO/IO_Main.h"
 #include "../Memory/DMA_Memory.h"
 #include "../Memory/Memory_Main.h"
-#include "../Memory/Other_Utils.h"
+#include "../DefaultLibrary/DefaultLibrary.h"
 #include "../Paging/Paging_Main.h"
 #include "../Serial.h"
 

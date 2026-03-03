@@ -116,8 +116,6 @@ void driver_select_register_binary_display_drivers(void) {
     driver_select_register_display_driver(&g_boot_fb_driver);
     load_display_driver_module(DRIVER_MODULE_ID_DISPLAY_VIRTIO,
                                "VirtIO_Driver.ELF");
-    load_display_driver_module(DRIVER_MODULE_ID_DISPLAY_INTEL_UHD_9TH,
-                               "Intel_UHD_Graphics_9TH_Driver.ELF");
     load_display_driver_module(DRIVER_MODULE_ID_DISPLAY_IMPLUS_DISPLAY_GENERIC_DRIVER,
                                "ImplusOS_Generic_Display_Driver.ELF");
 }

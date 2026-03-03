@@ -6,7 +6,7 @@
 #include "../../../Serial.h"
 #include "../../../IO/IO_Main.h"
 #include "../../../Memory/Memory_Main.h"
-#include "../../../Memory/Other_Utils.h"
+#include "../../../DefaultLibrary/DefaultLibrary.h"
 #include "../../../Paging/Paging_Main.h"
 #ifdef IMPLUS_DRIVER_MODULE
 #include "../../DriverBinary.h"

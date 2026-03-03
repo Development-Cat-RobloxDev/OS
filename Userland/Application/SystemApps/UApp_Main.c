@@ -214,7 +214,6 @@ void _start(void)
                     if (decoded_image) {
                         kfree(decoded_image);
                     }
-                    return;
                 }
             }
         }

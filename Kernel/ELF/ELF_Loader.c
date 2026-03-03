@@ -1,8 +1,9 @@
+#include "../DefaultLibrary/DefaultLibrary.h"
+
 #include "ELF_Loader.h"
 
 #include "../Drivers/FileSystem/FAT32/FAT32_Main.h"
 #include "../Memory/Memory_Main.h"
-#include "../Memory/Other_Utils.h"
 #include "../Serial.h"
 
 #include <stddef.h>

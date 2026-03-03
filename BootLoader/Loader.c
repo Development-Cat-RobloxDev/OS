@@ -293,7 +293,6 @@ static EFI_STATUS PreloadDriverModules(
         { DRIVER_MODULE_ID_FAT32, L"\\Kernel\\Driver\\FAT32_Driver.ELF", TRUE },
         { DRIVER_MODULE_ID_PS2, L"\\Kernel\\Driver\\PS2_Driver.ELF", TRUE },
         { DRIVER_MODULE_ID_DISPLAY_VIRTIO, L"\\Kernel\\Driver\\VirtIO_Driver.ELF", FALSE },
-        { DRIVER_MODULE_ID_DISPLAY_INTEL_UHD_9TH, L"\\Kernel\\Driver\\Intel_UHD_Graphics_9TH_Driver.ELF", FALSE },
         { DRIVER_MODULE_ID_DISPLAY_IMPLUS_DISPLAY_GENERIC_DRIVER, L"\\Kernel\\Driver\\ImplusOS_Generic_Display_Driver.ELF", FALSE },
     };
 

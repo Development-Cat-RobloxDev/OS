@@ -16,6 +16,7 @@
 #include "ProcessManager/ProcessManager.h"
 #include "WindowManager/WindowManager.h"
 #include "Serial.h"
+#include "BMP.h"
 
 #include <stdbool.h>
 
@@ -171,6 +172,26 @@ void kernel_main(BOOT_INFO *boot_info) {
         serial_write_string("[OS] [WARN] Display unavailable. Running in headless mode.\n");
     }
 
+    void* bmp_data;
+    uint32_t bmp_size;
+
+    if (load_bmp("os_logo.bmp", &bmp_data, &bmp_size)) {
+        draw_bmp_center_ex(bmp_data,0x000000);
+        serial_write_string("[OS] BMP displayed\n");
+    } else {
+        serial_write_string("[OS] Failed to load BMP\n");
+    }
+
+    if (display_ready) {
+        serial_write_string("[OS] Initializing window manager...\n");
+        window_manager_ready = window_manager_init();
+        if (!window_manager_ready) {
+            serial_write_string("[OS] [WARN] Window manager init failed. GUI syscalls disabled.\n");
+        }
+    } else {
+        serial_write_string("[OS] [WARN] Window manager skipped (display dependency not ready).\n");
+    }
+
     serial_write_string("[OS] Initializing PS/2 input...\n");
     ps2_ready = ps2_input_init();
     if (!ps2_ready) {
@@ -182,16 +203,6 @@ void kernel_main(BOOT_INFO *boot_info) {
 
     serial_write_string("[OS] Initializing process manager...\n");
     process_manager_init();
-
-    if (display_ready) {
-        serial_write_string("[OS] Initializing window manager...\n");
-        window_manager_ready = window_manager_init();
-        if (!window_manager_ready) {
-            serial_write_string("[OS] [WARN] Window manager init failed. GUI syscalls disabled.\n");
-        }
-    } else {
-        serial_write_string("[OS] [WARN] Window manager skipped (display dependency not ready).\n");
-    }
 
     syscall_file_init();
 

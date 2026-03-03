@@ -1,8 +1,14 @@
+#include "../DefaultLibrary/DefaultLibrary.h"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "../Thirdparty/stb/stb_truetype.h"
+
 #include "WindowManager.h"
 
 #include "../Drivers/Display/Display_Main.h"
 #include "../KernelConfig.h"
 #include "../Memory/Memory_Main.h"
+#include "../Drivers/FileSystem/FAT32/FAT32_Main.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -38,6 +44,14 @@
 #define WM_DEFAULT_CLIENT_BG        0xFF0F131Au
 
 typedef struct {
+    uint8_t *ttf_buffer;
+    stbtt_fontinfo font;
+    uint8_t initialized;
+} wm_font_t;
+
+static wm_font_t g_font;
+
+typedef struct {
     uint8_t used;
     int32_t owner_pid;
     uint32_t x;
@@ -53,6 +67,114 @@ static wm_window_t g_windows[WM_MAX_WINDOWS];
 static uint32_t g_next_z_order = 1;
 static uint32_t g_window_spawn_count = 0;
 static uint8_t g_initialized = 0;
+
+static bool wm_load_font(const char *path)
+{
+    FAT32_FILE file;
+    if (!fat32_find_file(path, &file)) {
+        return false;
+    }
+
+    uint32_t size = fat32_get_file_size(&file);
+    if (size == 0) {
+        return false;
+    }
+
+    uint8_t *buffer = (uint8_t *)kmalloc(size);
+    if (!buffer) {
+        return false;
+    }
+
+    if (!fat32_read_file(&file, buffer)) {
+        kfree(buffer);
+        return false;
+    }
+
+    if (!stbtt_InitFont(&g_font.font, buffer, 0)) {
+        kfree(buffer);
+        return false;
+    }
+
+    g_font.ttf_buffer = buffer;
+    g_font.initialized = 1;
+    return true;
+}
+
+static void wm_draw_char(wm_window_t *window,
+                         int32_t x,
+                         int32_t y,
+                         char c,
+                         float scale,
+                         uint32_t color)
+{
+    if (!g_font.initialized || !window || !window->pixels) {
+        return;
+    }
+
+    int w, h, xoff, yoff;
+
+    unsigned char *bitmap = stbtt_GetCodepointBitmap(
+        &g_font.font,
+        0,
+        scale,
+        c,
+        &w,
+        &h,
+        &xoff,
+        &yoff
+    );
+
+    for (int32_t by = 0; by < h; ++by) {
+        for (int32_t bx = 0; bx < w; ++bx) {
+
+            int32_t dst_x = x + bx + xoff;
+            int32_t dst_y = y + by + yoff;
+
+            if (dst_x < 0 || dst_y < 0 ||
+                dst_x >= (int32_t)window->width ||
+                dst_y >= (int32_t)window->height) {
+                continue;
+            }
+
+            uint8_t alpha = bitmap[by * w + bx];
+
+            if (alpha > 0) {
+                window->pixels[(uint64_t)dst_y * window->width + dst_x] = color;
+            }
+        }
+    }
+
+    stbtt_FreeBitmap(bitmap, NULL);
+}
+
+static void wm_draw_text(wm_window_t *window,
+                         int32_t x,
+                         int32_t y,
+                         const char *text,
+                         float size,
+                         uint32_t color)
+{
+    if (!g_font.initialized || !text) {
+        return;
+    }
+
+    float scale = stbtt_ScaleForPixelHeight(&g_font.font, size);
+
+    int32_t pen_x = x;
+
+    for (const char *p = text; *p; ++p) {
+        int ax;
+        int lsb;
+
+        stbtt_GetCodepointHMetrics(&g_font.font, *p, &ax, &lsb);
+
+        wm_draw_char(window, pen_x, y, *p, scale, color);
+
+        pen_x += (int32_t)(ax * scale);
+    }
+
+    window->dirty = 1;
+}
 
 static int32_t wm_find_window_index_by_pid(int32_t pid)
 {
@@ -323,6 +445,64 @@ static void wm_draw_window_buttons(int32_t title_x,
     wm_draw_clipped_rect(close_x, button_y, button_size, 1u, WM_BUTTON_HILITE_COLOR, screen_w, screen_h);
 }
 
+static void wm_draw_text_to_screen(int32_t x,
+                                   int32_t y,
+                                   const char *text,
+                                   float size,
+                                   uint32_t color,
+                                   uint32_t screen_w,
+                                   uint32_t screen_h)
+{
+    if (!g_font.initialized || !text) {
+        return;
+    }
+
+    float scale = stbtt_ScaleForPixelHeight(&g_font.font, size);
+    int32_t pen_x = x;
+
+    for (const char *p = text; *p; ++p) {
+        int w, h, xoff, yoff;
+
+        unsigned char *bitmap = stbtt_GetCodepointBitmap(
+            &g_font.font,
+            0,
+            scale,
+            *p,
+            &w,
+            &h,
+            &xoff,
+            &yoff
+        );
+
+        for (int32_t by = 0; by < h; ++by) {
+            for (int32_t bx = 0; bx < w; ++bx) {
+
+                int32_t dst_x = pen_x + bx + xoff;
+                int32_t dst_y = y + by + yoff;
+
+                if (dst_x < 0 || dst_y < 0 ||
+                    dst_x >= (int32_t)screen_w ||
+                    dst_y >= (int32_t)screen_h) {
+                    continue;
+                }
+
+                uint8_t alpha = bitmap[by * w + bx];
+                if (alpha > 0) {
+                    display_draw_pixel((uint32_t)dst_x,
+                                       (uint32_t)dst_y,
+                                       color);
+                }
+            }
+        }
+
+        stbtt_FreeBitmap(bitmap, NULL);
+
+        int ax, lsb;
+        stbtt_GetCodepointHMetrics(&g_font.font, *p, &ax, &lsb);
+        pen_x += (int32_t)(ax * scale);
+    }
+}
+
 static void wm_compose_window(const wm_window_t *window, uint32_t screen_w, uint32_t screen_h, bool is_active)
 {
     if (!window || !window->used || !window->pixels) {
@@ -375,6 +555,17 @@ static void wm_compose_window(const wm_window_t *window, uint32_t screen_w, uint
 
     wm_draw_window_buttons(title_x, title_y, title_w, title_h, screen_w, screen_h);
 
+    const char *title = "Window";
+    int32_t text_x = title_x + 7.5;
+    int32_t text_y = title_y + 12.5;
+    wm_draw_text_to_screen(text_x,
+                       text_y,
+                       title,
+                       17.0f,
+                       0xFFFFFFFFu,
+                       screen_w,
+                       screen_h);
+
     int32_t client_x = frame_x + (int32_t)WM_BORDER;
     int32_t client_y = frame_y + (int32_t)WM_TITLEBAR_HEIGHT;
 
@@ -388,7 +579,7 @@ static void wm_compose_window(const wm_window_t *window, uint32_t screen_w, uint
     if (blit_x1 > (int32_t)screen_w) { blit_x1 = (int32_t)screen_w; }
     if (blit_y1 > (int32_t)screen_h) { blit_y1 = (int32_t)screen_h; }
 
-    if (blit_x0 < blit_x1 && blit_y0 < blit_y1) {
+    if (window->dirty && blit_x0 < blit_x1 && blit_y0 < blit_y1) {
         uint32_t src_x = (uint32_t)(blit_x0 - client_x);
         uint32_t src_y = (uint32_t)(blit_y0 - client_y);
         uint32_t blit_w = (uint32_t)(blit_x1 - blit_x0);
@@ -408,6 +599,17 @@ static void wm_compose_window(const wm_window_t *window, uint32_t screen_w, uint
 static void wm_compose_desktop(void)
 {
     if (!g_initialized || !display_is_ready()) {
+        return;
+    }
+
+    uint8_t any_dirty = 0;
+    for (int32_t i = 0; i < WM_MAX_WINDOWS; ++i) {
+        if (g_windows[i].used && g_windows[i].dirty) {
+            any_dirty = 1;
+            break;
+        }
+    }
+    if (!any_dirty) {
         return;
     }
 
@@ -513,6 +715,7 @@ bool window_manager_init(void)
     g_initialized = 1;
 
     wm_compose_desktop();
+    wm_load_font("Kernel/NotoSansJP-VariableFont_wght.ttf");
     return true;
 }
 

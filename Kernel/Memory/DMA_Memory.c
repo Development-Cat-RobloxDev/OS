@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "../DefaultLibrary/DefaultLibrary.h"
+
 #include "DMA_Memory.h"
 #include "Memory_Main.h"
 #include "../Sync/Spinlock.h"

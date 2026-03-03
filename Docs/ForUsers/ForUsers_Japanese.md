@@ -12,7 +12,7 @@
 - PS/2 キーボード・マウス入力パス
 - ウィンドウマネージャ描画 syscall
 - PNG デコーダのユーザーランドサンプル
-- 表示ドライバ: VirtIO GPU / Intel UHD Graphics 9th / 汎用フレームバッファ
+- 表示ドライバ: VirtIO GPU / 汎用フレームバッファ
 
 ## 現在の制約
 - 動作確認は QEMU + OVMF を中心に行っています。

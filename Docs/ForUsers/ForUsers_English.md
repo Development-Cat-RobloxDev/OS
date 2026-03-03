@@ -12,7 +12,7 @@
 - PS/2 keyboard and mouse input path.
 - Window manager drawing syscalls.
 - PNG decoder user application sample.
-- Display drivers: VirtIO GPU, Intel UHD Graphics 9th, generic framebuffer path.
+- Display drivers: VirtIO GPU, generic framebuffer path.
 
 ## Current Constraints
 - Verified operation is centered on QEMU + OVMF.

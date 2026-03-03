@@ -23,7 +23,6 @@ PCI_DRIVER_ELF    := $(BUILD_DIR)/Kernel/Drivers/PCI_Driver.ELF
 FAT32_DRIVER_ELF  := $(BUILD_DIR)/Kernel/Drivers/FAT32_Driver.ELF
 PS2_DRIVER_ELF    := $(BUILD_DIR)/Kernel/Drivers/PS2_Driver.ELF
 VIRTIO_DRIVER_ELF := $(BUILD_DIR)/Kernel/Drivers/Display/VirtIO_Driver.ELF
-INTEL_DRIVER_ELF  := $(BUILD_DIR)/Kernel/Drivers/Display/Intel_UHD_Graphics_9TH_Driver.ELF
 GENERIC_DISPLAY_DRIVER_ELF := $(BUILD_DIR)/Kernel/Drivers/Display/ImplusOS_Generic_Display_Driver.ELF
 
 KERNEL_CFLAGS := \
@@ -68,8 +67,8 @@ DRIVER_MODULE_LDFLAGS := -nostdlib -shared -Wl,--build-id=none -Wl,-Bsymbolic -W
 
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
+	Kernel/DefaultLibrary/DefaultLibrary.c \
 	Kernel/Memory/Memory_Main.c \
-	Kernel/Memory/Other_Utils.c \
 	Kernel/Memory/DMA_Memory.c \
 	Kernel/Paging/Paging_Main.c \
 	Kernel/SMP/SMP_Main.c \
@@ -88,7 +87,8 @@ KERNEL_C_SRCS := \
 	Kernel/WindowManager/WindowManager.c \
 	Kernel/Syscall/Syscall_Init.c \
 	Kernel/Syscall/Syscall_File.c \
-	Kernel/Syscall/Syscall_Dispatch.c
+	Kernel/Syscall/Syscall_Dispatch.c \
+	Kernel/BMPLoad.c
 
 KERNEL_ASM_SRCS := \
 	Kernel/Paging/Paging.asm \
@@ -114,7 +114,6 @@ DRIVER_MODULE_OBJS := \
 	$(BUILD_DIR)/Modules/FAT32_Module.o \
 	$(BUILD_DIR)/Modules/PS2_Module.o \
 	$(BUILD_DIR)/Modules/VirtIO_Module.o \
-	$(BUILD_DIR)/Modules/Intel_Module.o \
 	$(BUILD_DIR)/Modules/ImplusOS_Generic_Display_Driver.o
 
 all: $(BOOTX64_EFI) \
@@ -125,7 +124,6 @@ all: $(BOOTX64_EFI) \
      $(FAT32_DRIVER_ELF) \
      $(PS2_DRIVER_ELF) \
      $(VIRTIO_DRIVER_ELF) \
-     $(INTEL_DRIVER_ELF) \
      $(GENERIC_DISPLAY_DRIVER_ELF)
 
 $(BUILD_DIR)/Loader/Loader.o: BootLoader/Loader.c
@@ -191,10 +189,6 @@ $(BUILD_DIR)/Modules/VirtIO_Module.o: Kernel/Drivers/Display/VirtIO/VirtIO.c
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/Modules/Intel_Module.o: Kernel/Drivers/Display/Intel_UHD_Graphics_9TH/Intel_UHD_Graphics_9TH.c
-	mkdir -p $(dir $@)
-	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
-
 $(BUILD_DIR)/Modules/ImplusOS_Generic_Display_Driver.o: Kernel/Drivers/Display/ImplusOS_Generic/ImplusOS_Generic.c
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_CFLAGS) -c $< -o $@
@@ -212,10 +206,6 @@ $(PS2_DRIVER_ELF): $(BUILD_DIR)/Modules/PS2_Module.o
 	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
 
 $(VIRTIO_DRIVER_ELF): $(BUILD_DIR)/Modules/VirtIO_Module.o
-	mkdir -p $(dir $@)
-	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
-
-$(INTEL_DRIVER_ELF): $(BUILD_DIR)/Modules/Intel_Module.o
 	mkdir -p $(dir $@)
 	$(CC) $(DRIVER_MODULE_LDFLAGS) $^ -o $@
 
@@ -240,9 +230,11 @@ __mount_image:
 	sudo cp $(KERNEL_ELF) $$MOUNT_POINT/Kernel/Kernel_Main.ELF; \
 	sudo cp $(USERLAND_INIT_ELF) $$MOUNT_POINT/Userland/Userland.ELF; \
 	sudo cp $(USERLAND_APP_ELF) $$MOUNT_POINT/Userland/SystemApps/UserApp.ELF; \
-	sudo cp $(PCI_DRIVER_ELF) $(FAT32_DRIVER_ELF) $(PS2_DRIVER_ELF) $(VIRTIO_DRIVER_ELF) $(INTEL_DRIVER_ELF) $(GENERIC_DISPLAY_DRIVER_ELF) $$MOUNT_POINT/Kernel/Driver/; \
+	sudo cp Kernel/WindowManager/NotoSansJP-VariableFont_wght.ttf $$MOUNT_POINT/Kernel/NotoSansJP-VariableFont_wght.ttf; \
+	sudo cp $(PCI_DRIVER_ELF) $(FAT32_DRIVER_ELF) $(PS2_DRIVER_ELF) $(VIRTIO_DRIVER_ELF) $(GENERIC_DISPLAY_DRIVER_ELF) $$MOUNT_POINT/Kernel/Driver/; \
 	[ -f Kernel/FILE.TXT ] && sudo cp Kernel/FILE.TXT $$MOUNT_POINT/FILE.TXT; \
 	[ -f Userland/image.png ] && sudo cp Userland/image.png $$MOUNT_POINT/Userland/image.png; \
+	[ -f Kernel/os_logo.bmp ] && sudo cp Kernel/os_logo.bmp $$MOUNT_POINT/os_logo.bmp; \
 	sync; \
 	sudo umount $$MOUNT_POINT || exit 1;
 
@@ -255,9 +247,11 @@ image_esp: all
 	@cp $(KERNEL_ELF) $(ISO_ROOT)/Kernel/Kernel_Main.ELF
 	@cp $(USERLAND_INIT_ELF) $(ISO_ROOT)/Userland/Userland.ELF
 	@cp $(USERLAND_APP_ELF) $(ISO_ROOT)/Userland/SystemApps/UserApp.ELF
-	@cp $(PCI_DRIVER_ELF) $(FAT32_DRIVER_ELF) $(PS2_DRIVER_ELF) $(VIRTIO_DRIVER_ELF) $(INTEL_DRIVER_ELF) $(GENERIC_DISPLAY_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
+	@cp Kernel/WindowManager/NotoSansJP-VariableFont_wght.ttf $(ISO_ROOT)/Kernel/NotoSansJP-VariableFont_wght.ttf
+	@cp $(PCI_DRIVER_ELF) $(FAT32_DRIVER_ELF) $(PS2_DRIVER_ELF) $(VIRTIO_DRIVER_ELF) $(GENERIC_DISPLAY_DRIVER_ELF) $(ISO_ROOT)/Kernel/Driver/
 	@[ -f Kernel/FILE.TXT ] && cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT || true
 	@[ -f Userland/image.png ] && cp Userland/image.png $(ISO_ROOT)/Userland/image.png || true
+	@[ -f Kernel/os_logo.bmp ] && cp Kernel/os_logo.bmp $(ISO_ROOT)/os_logo.bmp || true
 	@cp $(ESP_IMG) $(ISO_ROOT)/esp.iso
 	@$(MAKE) __create_esp_iso
 

@@ -1,5 +1,6 @@
-#include "Paging_Main.h"
+#include "../DefaultLibrary/DefaultLibrary.h"
 
+#include "Paging_Main.h"
 #include "../Memory/Memory_Main.h"
 #include "../Serial.h"
 
@@ -53,8 +54,6 @@ typedef struct {
 static swap_slot_t g_swap_slots[SWAP_SLOT_COUNT];
 static swap_track_t g_swap_tracks[SWAP_TRACK_MAX];
 static uint8_t g_swap_enabled = 1;
-
-void *memset(void *ptr, int value, size_t num);
 
 static inline uint64_t read_cr3(void)
 {
