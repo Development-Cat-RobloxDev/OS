@@ -68,6 +68,8 @@ DRIVER_MODULE_LDFLAGS := -nostdlib -shared -Wl,--build-id=none -Wl,-Bsymbolic -W
 KERNEL_C_SRCS := \
 	Kernel/Kernel_Main.c \
 	Kernel/DefaultLibrary/DefaultLibrary.c \
+	Kernel/Timer/Timer.c \
+	Kernel/Boot/LoadBar.c \
 	Kernel/Memory/Memory_Main.c \
 	Kernel/Memory/DMA_Memory.c \
 	Kernel/Paging/Paging_Main.c \

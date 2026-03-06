@@ -16,6 +16,7 @@ static IDT_Ptr idt_ptr;
 static isr_t irq_routines[MAX_IRQS] = {0};
 
 extern void isr_default(void);
+extern void isr_irq0(void);
 extern void isr_page_fault(void);
 extern void isr_double_fault(void);
 extern void isr_nmi(void);
@@ -225,6 +226,7 @@ void init_idt(void)
         set_interrupt_handler((uint16_t)i, isr_default);
     }
 
+    set_interrupt_handler(32, isr_irq0);
     set_interrupt_handler_with_ist(2, isr_nmi, 2);
     set_interrupt_handler_with_ist(8, isr_double_fault, 1);
     set_interrupt_handler(13, isr_general_protection);

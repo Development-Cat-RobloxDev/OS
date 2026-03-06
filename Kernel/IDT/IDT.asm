@@ -2,6 +2,7 @@ BITS 64
 
 global load_idt
 global isr_default
+global isr_irq0
 global isr_page_fault
 global isr_double_fault
 global isr_nmi
@@ -14,6 +15,7 @@ extern nmi_handler
 extern general_protection_fault_handler
 extern machine_check_handler
 extern page_fault_handler
+extern irq_handler
 
 SECTION .text
 
@@ -36,6 +38,50 @@ isr_default:
 
     mov al, 0x20
     out 0x20, al
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    iretq
+
+; IRQ0 (PIT timer) -> calls C irq_handler(32)
+isr_irq0:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    ; Align stack to 16 bytes before call (rsp currently misaligned by pushes)
+    sub rsp, 8
+
+    mov rdi, 32            ; IRQ vector number after PIC remap
+    call irq_handler
+
+    add rsp, 8
 
     pop r15
     pop r14

@@ -18,6 +18,8 @@
 #include "Serial.h"
 #include "BMP.h"
 #include "Sync/Spinlock.h"
+#include "Timer/Timer.h"
+#include "Boot/LoadBar.h"
 
 #include <stdbool.h>
 
@@ -227,6 +229,9 @@ void kernel_main(BOOT_INFO *boot_info) {
     serial_write_string("[OS] Initializing GDT...\n");
     init_gdt();
 
+    serial_write_string("[OS] Initializing timer...\n");
+    timer_init(60);
+
     driver_module_manager_init(boot_info);
     display_boot_framebuffer_t boot_fb = {
         .addr = (void *)(uintptr_t)boot_info->FrameBufferBase,
@@ -247,6 +252,7 @@ void kernel_main(BOOT_INFO *boot_info) {
     bool display_ready = false;
     bool ps2_ready = false;
     bool window_manager_ready = false;
+    bool load_bar_active = false;
 
     serial_write_string("[OS] Initializing display...\n");
     display_ready = display_init();
@@ -267,10 +273,20 @@ void kernel_main(BOOT_INFO *boot_info) {
     }
 
     if (display_ready) {
+        load_bar_init();
+        load_bar_set_target(15);
+        timer_set_callback(load_bar_tick);
+        load_bar_active = true;
+    }
+
+    if (display_ready) {
         serial_write_string("[OS] Initializing window manager...\n");
         window_manager_ready = window_manager_init();
         if (!window_manager_ready) {
             serial_write_string("[OS] [WARN] Window manager init failed. GUI syscalls disabled.\n");
+        }
+        if (load_bar_active) {
+            load_bar_set_target(35);
         }
     } else {
         serial_write_string("[OS] [WARN] Window manager skipped (display dependency not ready).\n");
@@ -281,14 +297,26 @@ void kernel_main(BOOT_INFO *boot_info) {
     if (!ps2_ready) {
         serial_write_string("[OS] [WARN] PS/2 input unavailable. Input syscalls will be idle.\n");
     }
+    if (load_bar_active) {
+        load_bar_set_target(50);
+    }
     
     serial_write_string("[OS] Initializing syscall...\n");
-    syscall_init(); 
+    syscall_init();
+    if (load_bar_active) {
+        load_bar_set_target(65);
+    }
 
     serial_write_string("[OS] Initializing process manager...\n");
     process_manager_init();
+    if (load_bar_active) {
+        load_bar_set_target(80);
+    }
 
     syscall_file_init();
+    if (load_bar_active) {
+        load_bar_set_target(90);
+    }
 
     serial_write_string("[OS] Loading userland ELF...\n");
     if (!load_userland_elf(&user_entry)) {
@@ -298,7 +326,13 @@ void kernel_main(BOOT_INFO *boot_info) {
             __asm__("hlt");
         }
     }
-    
+    if (load_bar_active) {
+        load_bar_set_target(100);
+        load_bar_finish();
+        timer_set_callback(NULL);
+        load_bar_active = false;
+    }
+
     serial_write_string("[OS] ===== Kernel Init Complete =====\n");
     serial_write_string("[OS] Transferring control to userland...\n\n");
 
