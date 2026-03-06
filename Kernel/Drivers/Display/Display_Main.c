@@ -21,11 +21,15 @@ bool display_is_ready(void) {
         return false;
     }
 
+    if (g_active_display_driver->is_ready == NULL) {
+        return false;
+    }
+
     return g_active_display_driver->is_ready();
 }
 
 uint32_t display_width(void) {
-    if (!display_is_ready()) {
+    if (!display_is_ready() || g_active_display_driver->width == NULL) {
         return 0;
     }
 
@@ -33,7 +37,7 @@ uint32_t display_width(void) {
 }
 
 uint32_t display_height(void) {
-    if (!display_is_ready()) {
+    if (!display_is_ready() || g_active_display_driver->height == NULL) {
         return 0;
     }
 
@@ -41,7 +45,7 @@ uint32_t display_height(void) {
 }
 
 void display_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
-    if (!display_is_ready()) {
+    if (!display_is_ready() || g_active_display_driver->draw_pixel == NULL) {
         return;
     }
 
@@ -49,7 +53,7 @@ void display_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
 }
 
 void display_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-    if (!display_is_ready()) {
+    if (!display_is_ready() || g_active_display_driver->fill_rect == NULL) {
         return;
     }
 
@@ -57,7 +61,7 @@ void display_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t 
 }
 
 void display_present(void) {
-    if (!display_is_ready()) {
+    if (!display_is_ready() || g_active_display_driver->present == NULL) {
         return;
     }
 

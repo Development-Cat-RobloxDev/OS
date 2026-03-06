@@ -187,8 +187,10 @@ uint64_t syscall_dispatch(uint64_t saved_rsp,
 {
     int request_switch = 0;
     int32_t current_pid = process_get_current_pid();
-
-    ps2_input_poll();
+    
+    if (num == SYSCALL_INPUT_READ_KEYBOARD || num == SYSCALL_INPUT_READ_MOUSE) {
+        ps2_input_poll();
+    }
 
     process_capability_mask_t required_capability = syscall_required_capability(num);
     if (required_capability != 0 &&
@@ -584,6 +586,15 @@ schedule:
                                                               current_user_rsp,
                                                               request_switch,
                                                               &next_user_rsp);
+
+        if (!request_switch) {
+            if (next_saved_rsp != saved_rsp || next_user_rsp != current_user_rsp) {
+                serial_write_string("[OS] [SYSCALL] non-switch return mismatch, clamped\n");
+            }
+            next_saved_rsp = saved_rsp;
+            next_user_rsp = current_user_rsp;
+        }
+
         syscall_set_user_rsp(next_user_rsp);
         return next_saved_rsp;
     }

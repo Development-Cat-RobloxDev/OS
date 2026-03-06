@@ -17,6 +17,7 @@
 #include "WindowManager/WindowManager.h"
 #include "Serial.h"
 #include "BMP.h"
+#include "Sync/Spinlock.h"
 
 #include <stdbool.h>
 
@@ -25,6 +26,15 @@
 #define USER_ELF_MAX_SIZE (2ULL * 1024ULL * 1024ULL)
 
 static uint64_t user_entry = 0;
+static FAT32_FILE log_file;
+static bool log_file_ready = false;
+static uint32_t log_offset = 0;
+
+#define LOG_RING_BUFFER_SIZE 32768
+static char log_ring_buffer[LOG_RING_BUFFER_SIZE];
+static uint32_t log_ring_head = 0;
+static uint32_t log_ring_tail = 0;
+static spinlock_t log_lock;
 
 void serial_init(void) {
     outb(COM1_PORT + 1, 0x00);
@@ -37,16 +47,50 @@ void serial_init(void) {
 }
 
 void serial_write_char(char c) {
-    while ((inb(COM1_PORT + 5) & 0x20) == 0);
+    uint32_t timeout = 0x100000u;
+    while ((inb(COM1_PORT + 5) & 0x20) == 0) {
+        if (--timeout == 0) {
+            return;
+        }
+    }
     outb(COM1_PORT, c);
 }
 
-void serial_write_string(const char* str) {
-    while (*str) {
-        if (*str == '\n')
-            serial_write_char('\r');
-        serial_write_char(*str++);
+void log_write(const char* str) {
+    const char* p = str;
+    while (*p) {
+        log_ring_buffer[log_ring_head] = *p;
+        log_ring_head = (log_ring_head + 1) % LOG_RING_BUFFER_SIZE;
+        if (log_ring_head == log_ring_tail) {
+            log_ring_tail = (log_ring_tail + 1) % LOG_RING_BUFFER_SIZE;
+        }
+        p++;
     }
+
+    if (log_file_ready) {
+        while (log_ring_tail != log_ring_head) {
+            uint8_t c = (uint8_t)log_ring_buffer[log_ring_tail];
+            fat32_write_at(&log_file, log_offset, &c, 1);
+            log_offset++;
+            log_ring_tail = (log_ring_tail + 1) % LOG_RING_BUFFER_SIZE;
+        }
+    }
+}
+
+void serial_write_string(const char* str) {
+    spinlock_lock(&log_lock);
+    const char* p = str;
+
+    while (*p) {
+        if (*p == '\n')
+            serial_write_char('\r');
+
+        serial_write_char(*p);
+        p++;
+    }
+
+    //log_write(str);
+    spinlock_unlock(&log_lock);
 }
 
 void serial_write_uint64(uint64_t value) {
@@ -58,23 +102,41 @@ void serial_write_uint64(uint64_t value) {
 }
 
 void serial_write_uint32(uint32_t value) {
-    serial_write_uint64((uint64_t)value);
+    char hex[] = "0123456789ABCDEF";
+    serial_write_string("0x");
+    for (int i = 28; i >= 0; i -= 4) {
+        serial_write_char(hex[(value >> i) & 0xF]);
+    }
 }
 
 void serial_write_uint16(uint16_t value) {
-    serial_write_uint64((uint64_t)value);
+    char hex[] = "0123456789ABCDEF";
+    serial_write_string("0x");
+    for (int i = 12; i >= 0; i -= 4) {
+        serial_write_char(hex[(value >> i) & 0xF]);
+    }
 }
 
 void serial_write_uint8(uint8_t value) {
-    serial_write_uint64((uint64_t)value);
+    char hex[] = "0123456789ABCDEF";
+    serial_write_string("0x");
+    serial_write_char(hex[(value >> 4) & 0xF]);
+    serial_write_char(hex[value & 0xF]);
 }
 
 void serial_write_dec16(uint16_t v) {
-    char buf[6];
-    int i = 5;
-    buf[i] = '\0';
-    if (v == 0) { return; }
-    while (v > 0 && i > 0) { buf[--i] = '0' + (v % 10); v /= 10; }
+    char buf[7];
+    int i = 6;
+    buf[--i] = '\0';
+    if (v == 0) {
+        buf[--i] = '0';
+    } else {
+        while (v > 0 && i > 0) {
+            buf[--i] = (char)('0' + (v % 10));
+            v /= 10;
+        }
+    }
+    serial_write_string(&buf[i]);
 }
 
 void all_fs_initialize() {
@@ -121,21 +183,27 @@ void entry_user_mode() {
     __builtin_unreachable();
 }
 
+void log_init(void) {
+    spinlock_init(&log_lock);
+    fat32_mkdir("BootUpLog");
+    fat32_creat("BootUpLog/BUL.txt");
+
+    if (fat32_find_file("BootUpLog/BUL.txt", &log_file)) {
+        fat32_truncate(&log_file, 0);
+        log_offset = 0;
+        log_file_ready = true;
+        
+        spinlock_lock(&log_lock);
+        log_write("");
+        spinlock_unlock(&log_lock);
+    }
+}
+
 __attribute__((noreturn))
 void kernel_main(BOOT_INFO *boot_info) {
+    __asm__ volatile ("cli");
     serial_init();
     serial_write_string("\n[OS] ===== Kernel Starting =====\n");
-
-    driver_module_manager_init(boot_info);
-    display_boot_framebuffer_t boot_fb = {
-        .addr = (void *)(uintptr_t)boot_info->FrameBufferBase,
-        .size_bytes = boot_info->FrameBufferSize,
-        .width = boot_info->HorizontalResolution,
-        .height = boot_info->VerticalResolution,
-        .pixels_per_scan_line = boot_info->PixelsPerScanLine,
-        .bytes_per_pixel = 4,
-    };
-    driver_select_set_boot_framebuffer(&boot_fb);
     
     serial_write_string("[OS] Initializing physical memory...\n");
     init_physical_memory(
@@ -159,8 +227,22 @@ void kernel_main(BOOT_INFO *boot_info) {
     serial_write_string("[OS] Initializing GDT...\n");
     init_gdt();
 
+    driver_module_manager_init(boot_info);
+    display_boot_framebuffer_t boot_fb = {
+        .addr = (void *)(uintptr_t)boot_info->FrameBufferBase,
+        .size_bytes = boot_info->FrameBufferSize,
+        .width = boot_info->HorizontalResolution,
+        .height = boot_info->VerticalResolution,
+        .pixels_per_scan_line = boot_info->PixelsPerScanLine,
+        .bytes_per_pixel = 4,
+    };
+    driver_select_set_boot_framebuffer(&boot_fb);
+
+    __asm__ volatile ("sti");
+
     serial_write_string("[OS] Initializing file system...\n");
     all_fs_initialize();
+    log_init();
 
     bool display_ready = false;
     bool ps2_ready = false;
@@ -171,6 +253,8 @@ void kernel_main(BOOT_INFO *boot_info) {
     if (!display_ready) {
         serial_write_string("[OS] [WARN] Display unavailable. Running in headless mode.\n");
     }
+
+    display_fill_rect((uint32_t)0,(uint32_t)0,(uint32_t)display_width(),(uint32_t)display_height(),0x00000000);
 
     void* bmp_data;
     uint32_t bmp_size;

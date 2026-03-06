@@ -191,6 +191,8 @@ EFI_STATUS LoadKernelELF(
         );
         if (EFI_ERROR(Status)) {
             Print(L"[LOADER] Failed to allocate pages for segment %lu\n", i);
+            Print(L"[SEG %lu] paddr=%lx memsz=%lx filesz=%lx\n",
+            i, Ph->p_paddr, Ph->p_memsz, Ph->p_filesz);
             return Status;
         }
 

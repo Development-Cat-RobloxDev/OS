@@ -40,7 +40,12 @@ void init_gdt(void) {
     serial_write_string("[OS] [GDT] Start Initialize GDT.\n");
     uint32_t cpu_id = gdt_current_cpu_id();
     if (cpu_id >= GDT_MAX_CPUS) {
-        cpu_id = 0;
+        serial_write_string("[OS] [GDT] WARNING: CPU ID ");
+        serial_write_uint32(cpu_id);
+        serial_write_string(" exceeds GDT_MAX_CPUS (");
+        serial_write_uint32(GDT_MAX_CPUS);
+        serial_write_string("). This is not recommended for SMP systems.\n");
+        cpu_id = GDT_MAX_CPUS - 1;
     }
     struct TSS *tss = &g_tss[cpu_id];
 
@@ -92,7 +97,7 @@ void gdt_set_kernel_rsp0(uint64_t rsp0)
 {
     uint32_t cpu_id = gdt_current_cpu_id();
     if (cpu_id >= GDT_MAX_CPUS) {
-        cpu_id = 0;
+        cpu_id = GDT_MAX_CPUS - 1;
     }
     g_tss[cpu_id].rsp0 = rsp0 & ~0xFULL;
 }
@@ -104,7 +109,7 @@ void gdt_set_ist(uint8_t ist_index, uint64_t rsp)
     }
     uint32_t cpu_id = gdt_current_cpu_id();
     if (cpu_id >= GDT_MAX_CPUS) {
-        cpu_id = 0;
+        cpu_id = GDT_MAX_CPUS - 1;
     }
     g_tss[cpu_id].ist[ist_index - 1] = rsp & ~0xFULL;
 }

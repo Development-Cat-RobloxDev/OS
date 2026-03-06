@@ -5,6 +5,7 @@
 #include "../Memory/Memory_Main.h"
 #include "../Paging/Paging_Main.h"
 #include "../Serial.h"
+#include "../Sync/Spinlock.h"
 #include "../Syscall/Syscall_File.h"
 #include "../Syscall/Syscall_Main.h"
 #include "../WindowManager/WindowManager.h"
@@ -57,9 +58,14 @@ typedef struct {
 static process_t *g_processes = NULL;
 static int32_t g_process_capacity = 0;
 static int32_t g_current_pid = -1;
+static spinlock_t g_process_table_lock;
+
+#define OS_CONFIG_SMP_MAX_CPUS_LOCAL 4
+static int32_t g_current_pid_per_cpu[OS_CONFIG_SMP_MAX_CPUS_LOCAL];
 
 static void halt_forever(void)
 {
+    serial_write_string("[OS] [PROC] Halting system - no more runnable processes\n");
     while (1) {
         __asm__ volatile ("hlt");
     }
@@ -253,6 +259,21 @@ static int initialize_process_memory(process_t *proc, uint64_t entry)
     proc->user_stack_base = USER_STACK_BASE;
     proc->user_stack_top = USER_STACK_TOP;
     proc->capability_mask = PROCESS_CAP_DEFAULT_MASK;
+    
+    // デバッグ：メモリレイアウト情報を出力
+    serial_write_string("[PROC] Memory layout: CODE ");
+    serial_write_uint64(proc->user_code_base);
+    serial_write_string("-");
+    serial_write_uint64(proc->user_code_limit);
+    serial_write_string(", HEAP ");
+    serial_write_uint64(proc->user_heap_base);
+    serial_write_string("-");
+    serial_write_uint64(proc->user_heap_limit);
+    serial_write_string(", STACK ");
+    serial_write_uint64(proc->user_stack_base);
+    serial_write_string("-");
+    serial_write_uint64(proc->user_stack_top);
+    serial_write_string("\n");
 
     if (proc->user_code_limit <= proc->user_code_base ||
         proc->user_heap_limit <= proc->user_heap_base ||
@@ -326,10 +347,10 @@ static int range_within(uint64_t addr, uint64_t len, uint64_t start, uint64_t en
     if (len == 0) {
         return 1;
     }
-    uint64_t addr_end = addr + len;
-    if (addr_end <= addr) {
+    if (addr > (0xFFFFFFFFFFFFFFFFULL - len)) {
         return 0;
     }
+    uint64_t addr_end = addr + len;
     return (addr >= start) && (addr_end <= end);
 }
 
@@ -359,6 +380,7 @@ void process_manager_init(void)
         reset_process_slot(&g_processes[i]);
     }
     g_current_pid = -1;
+    spinlock_init(&g_process_table_lock);
 
     serial_write_string("[OS] [PROC] Process slot capacity=");
     serial_write_uint32((uint32_t)g_process_capacity);
@@ -443,17 +465,22 @@ int32_t process_spawn_user_elf(const char *path)
 
 void process_exit_current(void)
 {
+    spinlock_lock(&g_process_table_lock);
     if (!is_valid_pid(g_current_pid)) {
+        spinlock_unlock(&g_process_table_lock);
         return;
     }
 
+    int32_t pid_to_exit = g_current_pid;
+    spinlock_unlock(&g_process_table_lock);
+
     uint32_t closed_fds = 0;
     uint32_t closed_dirs = 0;
-    syscall_file_close_all_for_pid(g_current_pid, &closed_fds, &closed_dirs);
-    int32_t closed_windows = window_manager_destroy_window_for_process(g_current_pid);
+    syscall_file_close_all_for_pid(pid_to_exit, &closed_fds, &closed_dirs);
+    int32_t closed_windows = window_manager_destroy_window_for_process(pid_to_exit);
 
     serial_write_string("[OS] [PROC] exit_cleanup pid=");
-    serial_write_uint32((uint32_t)g_current_pid);
+    serial_write_uint32((uint32_t)pid_to_exit);
     serial_write_string(" fds=");
     serial_write_uint32(closed_fds);
     serial_write_string(" dirs=");
@@ -462,28 +489,41 @@ void process_exit_current(void)
     serial_write_uint32((closed_windows > 0) ? (uint32_t)closed_windows : 0);
     serial_write_string("\n");
 
-    g_processes[g_current_pid].state = PROCESS_STATE_DEAD;
+    spinlock_lock(&g_process_table_lock);
+    g_processes[pid_to_exit].state = PROCESS_STATE_DEAD;
+    spinlock_unlock(&g_process_table_lock);
 }
 
 int32_t process_get_current_pid(void)
 {
-    return g_current_pid;
+    spinlock_lock(&g_process_table_lock);
+    int32_t pid = g_current_pid;
+    spinlock_unlock(&g_process_table_lock);
+    return pid;
 }
 
 uint64_t process_get_current_user_rsp(void)
 {
+    spinlock_lock(&g_process_table_lock);
     if (!is_valid_pid(g_current_pid)) {
+        spinlock_unlock(&g_process_table_lock);
         return 0;
     }
-    return g_processes[g_current_pid].saved_user_rsp;
+    uint64_t rsp = g_processes[g_current_pid].saved_user_rsp;
+    spinlock_unlock(&g_process_table_lock);
+    return rsp;
 }
 
 uint64_t process_get_current_cr3(void)
 {
+    spinlock_lock(&g_process_table_lock);
     if (!is_valid_pid(g_current_pid)) {
+        spinlock_unlock(&g_process_table_lock);
         return paging_get_kernel_cr3();
     }
-    return g_processes[g_current_pid].cr3;
+    uint64_t cr3 = g_processes[g_current_pid].cr3;
+    spinlock_unlock(&g_process_table_lock);
+    return cr3;
 }
 
 uint64_t process_schedule_on_syscall(uint64_t current_saved_rsp,
@@ -495,7 +535,10 @@ uint64_t process_schedule_on_syscall(uint64_t current_saved_rsp,
         *next_user_rsp_out = current_user_rsp;
     }
 
+    spinlock_lock(&g_process_table_lock);
+
     if (!is_valid_pid(g_current_pid)) {
+        spinlock_unlock(&g_process_table_lock);
         serial_write_string("[OS] [PROC] Invalid current PID\n");
         return current_saved_rsp;
     }
@@ -508,16 +551,21 @@ uint64_t process_schedule_on_syscall(uint64_t current_saved_rsp,
     }
 
     if (!request_switch && current->state != PROCESS_STATE_DEAD) {
+        uint64_t return_saved_rsp = current->saved_rsp;
+        uint64_t return_user_rsp = current->saved_user_rsp;
         current->state = PROCESS_STATE_RUNNING;
+        spinlock_unlock(&g_process_table_lock);
+
         activate_process_context(current);
         if (next_user_rsp_out != NULL) {
-            *next_user_rsp_out = current->saved_user_rsp;
+            *next_user_rsp_out = return_user_rsp;
         }
-        return current->saved_rsp;
+        return return_saved_rsp;
     }
 
     int32_t next_pid = pick_next_ready(g_current_pid);
     if (next_pid < 0) {
+        spinlock_unlock(&g_process_table_lock);
         serial_write_string("[OS] [PROC] No runnable process. Halting.\n");
         halt_forever();
     }
@@ -526,12 +574,16 @@ uint64_t process_schedule_on_syscall(uint64_t current_saved_rsp,
     process_t *next = &g_processes[g_current_pid];
     next->state = PROCESS_STATE_RUNNING;
 
+    uint64_t next_saved_rsp = next->saved_rsp;
+    uint64_t next_user_rsp = next->saved_user_rsp;
+    spinlock_unlock(&g_process_table_lock);
+
     activate_process_context(next);
 
     if (next_user_rsp_out != NULL) {
-        *next_user_rsp_out = next->saved_user_rsp;
+        *next_user_rsp_out = next_user_rsp;
     }
-    return next->saved_rsp;
+    return next_saved_rsp;
 }
 
 uint64_t process_schedule_after_exit(uint64_t *next_user_rsp_out)
@@ -540,13 +592,17 @@ uint64_t process_schedule_after_exit(uint64_t *next_user_rsp_out)
         *next_user_rsp_out = 0;
     }
 
+    spinlock_lock(&g_process_table_lock);
+
     if (!is_valid_pid(g_current_pid)) {
+        spinlock_unlock(&g_process_table_lock);
         serial_write_string("[OS] [PROC] Invalid current PID on exit schedule\n");
         halt_forever();
     }
 
     int32_t next_pid = pick_next_ready(g_current_pid);
     if (next_pid < 0) {
+        spinlock_unlock(&g_process_table_lock);
         serial_write_string("[OS] [PROC] No runnable process after exit. Halting.\n");
         halt_forever();
     }
@@ -555,22 +611,30 @@ uint64_t process_schedule_after_exit(uint64_t *next_user_rsp_out)
     process_t *next = &g_processes[g_current_pid];
     next->state = PROCESS_STATE_RUNNING;
 
+    uint64_t next_saved_rsp = next->saved_rsp;
+    uint64_t next_user_rsp = next->saved_user_rsp;
+    spinlock_unlock(&g_process_table_lock);
+
     activate_process_context(next);
 
     if (next_user_rsp_out != NULL) {
-        *next_user_rsp_out = next->saved_user_rsp;
+        *next_user_rsp_out = next_user_rsp;
     }
-    return next->saved_rsp;
+    return next_saved_rsp;
 }
 
 int process_user_buffer_is_valid(const void *ptr, uint64_t len)
 {
+    spinlock_lock(&g_process_table_lock);
     if (!is_valid_pid(g_current_pid)) {
+        spinlock_unlock(&g_process_table_lock);
         return 0;
     }
 
     const process_t *proc = &g_processes[g_current_pid];
     uint64_t addr = (uint64_t)(uintptr_t)ptr;
+
+    spinlock_unlock(&g_process_table_lock);
 
     if (len == 0) {
         return 1;
@@ -719,6 +783,31 @@ uint64_t process_signal_set_handler(int32_t signum, uint64_t handler)
     uint64_t previous = proc->signal_handlers[(uint32_t)signum];
     proc->signal_handlers[(uint32_t)signum] = handler;
     return previous;
+}
+
+int process_signal_deliver(int32_t pid, int32_t signum)
+{
+    if (!is_valid_pid(pid)) {
+        return -1;
+    }
+    if (signum <= 0 || signum >= PROCESS_SIGNAL_MAX) {
+        return -1;
+    }
+
+    process_t *proc = &g_processes[pid];
+    uint64_t handler = proc->signal_handlers[(uint32_t)signum];
+
+    if (handler == 0) {
+        return 0;
+    }
+
+    serial_write_string("[OS] [PROC] Signal ");
+    serial_write_uint64((uint64_t)signum);
+    serial_write_string(" registered for PID ");
+    serial_write_uint64((uint64_t)pid);
+    serial_write_string(" but deliver NOT YET IMPLEMENTED\n");
+
+    return 0;
 }
 
 int process_is_guard_page_fault(uint64_t fault_addr)

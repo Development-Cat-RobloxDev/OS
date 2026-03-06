@@ -157,7 +157,19 @@ void dma_free(void *virt, size_t bytes)
 
 uint64_t virt_to_phys(void *virt)
 {
-    return (uint64_t)(uintptr_t)virt;
+    if (virt == NULL) {
+        return 0;
+    }
+    
+    uintptr_t virt_addr = (uintptr_t)virt;
+    
+    if (g_pool.initialized && 
+        virt_addr >= (uintptr_t)g_pool.base_virt &&
+        virt_addr < (uintptr_t)g_pool.base_virt + g_pool.total) {
+        return g_pool.base_phys + (virt_addr - (uintptr_t)g_pool.base_virt);
+    }
+    
+    return virt_addr + VIRT_TO_PHYS_OFFSET;
 }
 
 void dma_dump_stats(void)
@@ -186,5 +198,14 @@ void dma_dump_stats(void)
     size_t bump_remaining = g_pool.total - g_pool.offset;
 
     spinlock_unlock(&g_lock);
+    
+    serial_write_string("[DMA] used_blocks=");
+    serial_write_uint64((uint64_t)used_blocks);
+    serial_write_string(" used_bytes=");
+    serial_write_uint64((uint64_t)used_bytes);
+    serial_write_string(" free_bytes=");
+    serial_write_uint64((uint64_t)free_bytes);
+    serial_write_string(" bump_remaining=");
+    serial_write_uint64((uint64_t)bump_remaining);
     serial_write_string("\n");
 }

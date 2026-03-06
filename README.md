@@ -44,9 +44,10 @@ make run
 - Process manager and syscall dispatch.
 - FAT32 file I/O syscall backend.
 - PS/2 keyboard and mouse input path.
-- Window manager drawing syscalls.
+- Window manager with modern design (smooth layouts, enhanced decorations).
+- Desktop subsystem with background rendering and icon management.
 - PNG decoder user application sample.
-- Display drivers: VirtIO GPU, generic framebuffer path.
+- Display drivers: VirtIO GPU, generic framebuffer with double-buffering support.
 
 ## Current Constraints
 - Verified operation is QEMU + OVMF centric.

@@ -4,10 +4,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
-void* kmalloc(uint32_t size);
+void* kmalloc(uint64_t size);
+void* kmalloc_sensitive(uint64_t size);
 void kfree(void* ptr);
-void* kcalloc(uint32_t num, uint32_t size);
-void* krealloc(void* ptr, uint32_t new_size);
+void kfree_sensitive(void* ptr);
+void* kcalloc(uint64_t num, uint64_t size);
+void* krealloc(void* ptr, uint64_t new_size);
 
 void memory_init(void);
 void init_physical_memory(void *memory_map, size_t map_size, size_t desc_size);

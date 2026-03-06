@@ -572,9 +572,13 @@ void ps2_input_poll(void)
         return;
     }
 
-    while (inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_FULL) {
+    uint32_t poll_count = 0;
+    const uint32_t max_polls = PS2_MAX_POLL_READS * 2;
+    
+    while ((inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_FULL) && poll_count < max_polls) {
         uint8_t status = inb(PS2_STATUS_PORT);
         uint8_t value = inb(PS2_DATA_PORT);
+        poll_count++;
 
         if (value == PS2_ACK || value == PS2_RESEND) {
             g_mouse_packet_index = 0;
@@ -613,29 +617,26 @@ void ps2_input_poll(void)
             uint16_t next_x = clamp_u16_i32((int32_t)g_mouse_x + (int32_t)dx, PS2_MOUSE_X_MAX);
             uint16_t next_y = clamp_u16_i32((int32_t)g_mouse_y - (int32_t)dy, PS2_MOUSE_Y_MAX);
 
-            if (next_x == g_mouse_x && next_y == g_mouse_y && buttons == g_last_mouse_buttons) {
-                continue;
+            if (next_x != g_mouse_x || next_y != g_mouse_y || buttons != g_last_mouse_buttons) {
+                g_mouse_x = next_x;
+                g_mouse_y = next_y;
+
+                ps2_mouse_event_t event = {0};
+                event.x = g_mouse_x;
+                event.y = g_mouse_y;
+                event.buttons = buttons;
+                event.wheel = 0;
+
+                if (g_mouse_count >= PS2_QUEUE_SIZE) {
+                    g_mouse_tail = (g_mouse_tail + 1u) % PS2_QUEUE_SIZE;
+                    --g_mouse_count;
+                }
+
+                g_mouse_queue[g_mouse_head] = event;
+                g_mouse_head = (g_mouse_head + 1u) % PS2_QUEUE_SIZE;
+                ++g_mouse_count;
+                g_last_mouse_buttons = buttons;
             }
-
-            g_mouse_x = next_x;
-            g_mouse_y = next_y;
-
-            ps2_mouse_event_t event = {0};
-            event.x = g_mouse_x;
-            event.y = g_mouse_y;
-            event.buttons = buttons;
-            event.wheel = 0;
-
-            if (g_mouse_count >= PS2_QUEUE_SIZE) {
-                g_mouse_tail = (g_mouse_tail + 1u) % PS2_QUEUE_SIZE;
-                --g_mouse_count;
-            }
-
-            g_mouse_queue[g_mouse_head] = event;
-            g_mouse_head = (g_mouse_head + 1u) % PS2_QUEUE_SIZE;
-            ++g_mouse_count;
-
-            g_last_mouse_buttons = buttons;
         } else {
             if (value == 0xE0u) {
                 g_keyboard_e0_pending = 1;
@@ -662,7 +663,7 @@ void ps2_input_poll(void)
             event.pressed = (uint8_t)(pressed ? 1 : 0);
             event.modifiers = g_keyboard_modifiers;
             event.ascii = pressed ? (uint8_t)keyboard_scancode_to_ascii(keycode, g_keyboard_modifiers) : 0u;
-
+            
             if (g_keyboard_count >= PS2_QUEUE_SIZE) {
                 g_keyboard_tail = (g_keyboard_tail + 1u) % PS2_QUEUE_SIZE;
                 --g_keyboard_count;

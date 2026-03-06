@@ -96,15 +96,16 @@ static void load_display_driver_module(driver_module_id_t module_id,
 }
 
 static const display_driver_t g_boot_fb_driver = {
-    .name        = "BootFramebuffer",
-    .probe       = fb_probe,
-    .init        = fb_init,
-    .is_ready    = fb_is_ready,
-    .width       = fb_width,
-    .height      = fb_height,
-    .draw_pixel  = fb_draw_pixel,
-    .fill_rect   = fb_fill_rect,
-    .present     = fb_present,
+    .name            = "BootFramebuffer",
+    .probe           = fb_probe,
+    .init            = fb_init,
+    .is_ready        = fb_is_ready,
+    .width           = fb_width,
+    .height          = fb_height,
+    .draw_pixel      = fb_draw_pixel,
+    .fill_rect       = fb_fill_rect,
+    .present         = fb_present,
+    .set_framebuffer = generic_fb_set,
 };
 
 void driver_select_register_binary_display_drivers(void) {
@@ -126,6 +127,12 @@ const display_driver_t *driver_select_pick_display_driver(void) {
         if (!driver) {
             continue;
         }
+        
+        if (driver->set_framebuffer != NULL) {
+            if (!driver->set_framebuffer(&g_boot_framebuffer)) {
+                log_display_driver_status("NONFATAL", "set_framebuffer", driver->name);
+            }
+        }
 
         if (driver->probe && !driver->probe()) {
             continue;
@@ -139,6 +146,7 @@ const display_driver_t *driver_select_pick_display_driver(void) {
         log_display_driver_status("INFO", "driver_selected", driver->name);
         return driver;
     }
+
     log_display_driver_status("FATAL", "driver_select", "none");
     return NULL;
 }

@@ -35,3 +35,43 @@ This document summarizes the current kernel structure for process execution, mem
 - `0` or positive values indicate success / non-error payloads.
 - Negative values indicate errors and map to userland `os_errno`.
 - Canonical mapping table: `Docs/Architecture/Status_Codes.md`.
+
+## Window Manager Architecture
+- Window manager core: `Kernel/WindowManager/*`
+- **Modern Design Features**:
+  - Gradient-based background rendering for visual depth
+  - Smooth window frame decorations with active/inactive states
+  - Enhanced titlebar with icons for minimize, maximize, and close buttons
+  - Soft shadow effects for window depth perception
+  - Color-coded window states and hover effects
+  - Font rendering support via TrueType through `stb_truetype`
+- Per-process window slots with process ownership validation
+- Window drawing operations are per-process syscall-driven
+- Window redraw is coordinated through `window_manager_present_for_process()`
+- Syscall backend: `Kernel/Syscall/*`
+
+## Desktop Subsystem
+- Desktop component: `Kernel/Desktop/*`
+- **Features**:
+  - Desktop background rendering with gradient color schemes (top to bottom)
+  - Desktop icon management system (max 128 icons per desktop)
+  - Icon rendering with labeled captions
+  - Click event handling for desktop and window interactions
+  - Icon lifecycle management (add, remove, query)
+- Thread-safe icon operations via spinlock protection
+- Desktop initialization occurs after window manager setup
+- Integration with window manager for coordinated rendering
+
+## Display Driver Architecture
+- Display driver interface: `Kernel/Drivers/Display/Display_Driver.h`
+- **Double-Buffering Support (Generic Framebuffer)**:
+  - Off-screen back-buffer allocation for flicker-free rendering
+  - Enable: `fb_enable_double_buffering()`
+  - Disable: `fb_disable_double_buffering()`
+  - Present: `fb_present()` swaps back-buffer to framebuffer
+  - Clear: `fb_clear()` fills with specified color
+  - Automatic back-buffer cleanup on framebuffer reconfiguration
+- Generic framebuffer: `Kernel/Drivers/Display/ImplusOS_Generic/*`
+  - Chunked memory mapping for large framebuffers (2MB granules)
+  - Supports both direct and double-buffered rendering modes
+- VirtIO GPU driver: `Kernel/Drivers/Display/VirtIO/*`

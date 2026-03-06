@@ -252,8 +252,12 @@ image_esp: all
 	@[ -f Kernel/FILE.TXT ] && cp Kernel/FILE.TXT $(ISO_ROOT)/FILE.TXT || true
 	@[ -f Userland/image.png ] && cp Userland/image.png $(ISO_ROOT)/Userland/image.png || true
 	@[ -f Kernel/os_logo.bmp ] && cp Kernel/os_logo.bmp $(ISO_ROOT)/os_logo.bmp || true
-	@cp $(ESP_IMG) $(ISO_ROOT)/esp.iso
 	@$(MAKE) __create_esp_iso
+	@cp $(ESP_IMG) $(ISO_ROOT)/esp.iso
+	@xorriso -as mkisofs -R -J -V "IMPLUSOS" \
+		-o $(IMAGE) \
+		-eltorito-alt-boot -e esp.iso -no-emul-boot \
+		$(ISO_ROOT)
 
 __create_esp_iso:
 	@ESP_MOUNT=$$(mktemp -d); \
@@ -265,20 +269,14 @@ __create_esp_iso:
 	sudo mkdir -p $$ESP_MOUNT/EFI/BOOT; \
 	sudo cp $(BOOTX64_EFI) $$ESP_MOUNT/EFI/BOOT/BOOTX64.EFI; \
 	sync; \
-	sudo umount $$ESP_MOUNT || exit 1; \
-	xorriso -as mkisofs -R -J -V "ImplusOS" \
-	-o $(IMAGE) \
-	-eltorito-alt-boot -e esp.iso -no-emul-boot \
-	$(ISO_ROOT)
+	sudo umount $$ESP_MOUNT || exit 1;
 
 run: image
 	@qemu-system-x86_64 -m 512M \
   		-machine pc \
   		-drive if=pflash,format=raw,readonly=on,file=${OVMF_CODE} \
   		-drive format=raw,file=${IMAGE} \
-  		-serial stdio \
-  		-vga none \
-  		-device virtio-gpu
+  		-serial stdio 
 	  	
 clean:
 	@rm -rf $(BUILD_DIR) $(IMAGE_DIR)

@@ -9,8 +9,10 @@
 #define PAGE_SIZE 4096
 #define MAX_PAGES 262144
 #define USER_RESERVED_TOP USER_STACK_TOP
+#define MAX_ALLOC_PAGE_RECURSION_DEPTH 5
 
 static uint8_t page_bitmap[MAX_PAGES];
+static uint32_t alloc_page_recursion_depth = 0;
 int paging_swap_reclaim_one_page(void);
 
 extern uint8_t _kernel_end;
@@ -28,8 +30,10 @@ enum {
 
 typedef struct memory_block {
     uint32_t magic;
-    uint32_t size;
-    int is_free;
+    uint64_t size;
+    uint8_t is_free;
+    uint8_t is_sensitive;
+    uint16_t reserved;
     struct memory_block* next;
 } memory_block_t;
 
@@ -64,8 +68,8 @@ static inline void irq_restore(uint64_t flags) {
     }
 }
 
-static inline uint32_t align_up(uint32_t value, uint32_t align) {
-    return (value + align - 1u) & ~(align - 1u);
+static inline uint64_t align_up(uint64_t value, uint64_t align) {
+    return (value + align - 1ull) & ~(align - 1ull);
 }
 
 static void memory_report_oom(const char *site, uint64_t request)
@@ -121,7 +125,7 @@ static memory_block_t* split_block_if_needed(memory_block_t *block, uint32_t siz
     return block;
 }
 
-static void* kmalloc_locked(uint32_t size) {
+static void* kmalloc_locked(uint64_t size) {
     if (heap_search_hint == NULL) {
         heap_search_hint = heap_start;
     }
@@ -134,6 +138,7 @@ static void* kmalloc_locked(uint32_t size) {
         if (current->is_free && current->size >= size) {
             current = split_block_if_needed(current, size);
             current->is_free = 0;
+            current->is_sensitive = 0;
             current->magic = HEAP_MAGIC;
             total_allocated += current->size;
             heap_search_hint = (current->next != NULL) ? current->next : heap_start;
@@ -237,7 +242,7 @@ void memory_init(void) {
     serial_write_string(" bytes\n");
 }
 
-void* kmalloc(uint32_t size) {
+void* kmalloc(uint64_t size) {
     if (!heap_initialized) {
         serial_write_string("[OS] [Memory] kmalloc called before heap init!\n");
         return NULL;
@@ -306,9 +311,11 @@ void kfree(void* ptr) {
     block->magic = HEAP_MAGIC_FREE;
     total_freed += block->size;
 
-    uint8_t* payload = (uint8_t*)ptr;
-    for (uint32_t i = 0; i < block->size; i++) {
-        payload[i] = 0;
+    if (block->is_sensitive) {
+        uint8_t* payload = (uint8_t*)ptr;
+        for (uint32_t i = 0; i < block->size; i++) {
+            payload[i] = 0;
+        }
     }
 
     if (block->next != NULL && block->next->is_free) {
@@ -327,17 +334,40 @@ void kfree(void* ptr) {
     irq_restore(irq_flags);
 }
 
-void* kcalloc(uint32_t num, uint32_t size) {
-    if (num != 0 && size > UINT32_MAX / num) {
+void* kmalloc_sensitive(uint64_t size) {
+    void* ptr = kmalloc(size);
+    if (ptr == NULL) return NULL;
+    
+    uintptr_t addr = (uintptr_t)ptr;
+    memory_block_t* block = (memory_block_t*)(addr - sizeof(memory_block_t));
+    block->is_sensitive = 1;
+    
+    return ptr;
+}
+
+void kfree_sensitive(void* ptr) {
+    if (ptr == NULL) return;
+    
+    uintptr_t addr = (uintptr_t)ptr;
+    memory_block_t* block = (memory_block_t*)(addr - sizeof(memory_block_t));
+    if (block->magic == HEAP_MAGIC) {
+        block->is_sensitive = 1;
+    }
+    
+    kfree(ptr);
+}
+
+void* kcalloc(uint64_t num, uint64_t size) {
+    if (num != 0 && size > UINT64_MAX / num) {
         serial_write_string("[OS] [Memory] kcalloc: Size overflow\n");
         return NULL;
     }
-    uint32_t total_size = num * size;
+    uint64_t total_size = num * size;
     void* ptr = kmalloc(total_size);
     
     if (ptr != NULL) {
         uint8_t* byte_ptr = (uint8_t*)ptr;
-        for (uint32_t i = 0; i < total_size; i++) {
+        for (uint64_t i = 0; i < total_size; i++) {
             byte_ptr[i] = 0;
         }
     }
@@ -345,16 +375,16 @@ void* kcalloc(uint32_t num, uint32_t size) {
     return ptr;
 }
 
-void* krealloc(void* ptr, uint32_t new_size) {
+void* krealloc(void* ptr, uint64_t new_size) {
     if (ptr == NULL) {
         return kmalloc(new_size);
     }
-    
+
     if (new_size == 0) {
         kfree(ptr);
         return NULL;
     }
-    
+
     new_size = align_up(new_size, MIN_ALLOC_ALIGN);
 
     uint32_t old_size = 0;
@@ -388,20 +418,21 @@ void* krealloc(void* ptr, uint32_t new_size) {
     }
     spinlock_unlock(&heap_lock);
     irq_restore(irq_flags);
-    
+
     void* new_ptr = kmalloc(new_size);
     if (new_ptr == NULL) {
         return NULL;
     }
-    
+
+    // Copy memory without holding locks - safe since we own the pointers
     uint8_t* src = (uint8_t*)ptr;
     uint8_t* dst = (uint8_t*)new_ptr;
     for (uint32_t i = 0; i < old_size; i++) {
         dst[i] = src[i];
     }
-    
+
     kfree(ptr);
-    
+
     return new_ptr;
 }
 
@@ -427,7 +458,7 @@ uint32_t get_free_memory(void) {
 uint32_t get_used_memory(void) {
     uint64_t irq_flags = irq_save_disable();
     spinlock_lock(&heap_lock);
-    uint32_t used = total_allocated - total_freed;
+    uint32_t used = (total_allocated >= total_freed) ? (total_allocated - total_freed) : 0;
     spinlock_unlock(&heap_lock);
     irq_restore(irq_flags);
     return used;
@@ -468,6 +499,12 @@ void debug_print_memory_info(void) {
 }
 
 void* alloc_page(void) {
+    if (alloc_page_recursion_depth >= MAX_ALLOC_PAGE_RECURSION_DEPTH) {
+        ++g_oom_pages;
+        memory_report_oom("alloc_page (recursion limit)", PAGE_SIZE);
+        return NULL;
+    }
+
     uint64_t irq_flags = irq_save_disable();
     spinlock_lock(&page_lock);
     for (size_t offset = 0; offset < MAX_PAGES; offset++) {
@@ -482,7 +519,12 @@ void* alloc_page(void) {
     }
     spinlock_unlock(&page_lock);
     irq_restore(irq_flags);
-    if (paging_swap_reclaim_one_page() > 0) {
+
+    ++alloc_page_recursion_depth;
+    int reclaim_result = paging_swap_reclaim_one_page();
+    --alloc_page_recursion_depth;
+
+    if (reclaim_result > 0) {
         return alloc_page();
     }
     ++g_oom_pages;
@@ -492,6 +534,11 @@ void* alloc_page(void) {
 
 void* alloc_contiguous_pages(uint32_t page_count, uint32_t align_pages) {
     if (page_count == 0 || page_count > MAX_PAGES) {
+        return NULL;
+    }
+    if (alloc_page_recursion_depth >= MAX_ALLOC_PAGE_RECURSION_DEPTH) {
+        ++g_oom_pages;
+        memory_report_oom("alloc_contiguous_pages (recursion limit)", (uint64_t)page_count * PAGE_SIZE);
         return NULL;
     }
     if (align_pages == 0) {
@@ -527,7 +574,12 @@ void* alloc_contiguous_pages(uint32_t page_count, uint32_t align_pages) {
 
     spinlock_unlock(&page_lock);
     irq_restore(irq_flags);
-    if (paging_swap_reclaim_one_page() > 0) {
+
+    ++alloc_page_recursion_depth;
+    int reclaim_result = paging_swap_reclaim_one_page();
+    --alloc_page_recursion_depth;
+
+    if (reclaim_result > 0) {
         return alloc_contiguous_pages(page_count, align_pages);
     }
     ++g_oom_pages;

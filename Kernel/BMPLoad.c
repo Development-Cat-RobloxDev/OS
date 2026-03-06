@@ -29,10 +29,13 @@ bool load_bmp(const char* path, void** out_buffer, uint32_t* out_size) {
     void* buffer = malloc(size);
     if (!buffer) return false;
 
+    serial_write_string("BMP: reading file\n");
+
     if (!fat32_read_file(&file, buffer)) {
         free(buffer);
         return false;
     }
+    serial_write_string("BMP: successfully reading file\n");
 
     *out_buffer = buffer;
     *out_size   = size;

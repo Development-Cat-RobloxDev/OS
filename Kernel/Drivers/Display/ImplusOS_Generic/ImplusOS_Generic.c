@@ -18,7 +18,7 @@
 #define GENERIC_FB_DEVICE_NAME "Generic Framebuffer"
 #define GENERIC_FB_BYTES_PER_PIXEL 4U
 #define GENERIC_FB_MAP_GRANULE (2ULL * 1024ULL * 1024ULL)
-#define GENERIC_FB_MAX_MAPPINGS 64U
+#define GENERIC_FB_MAX_MAPPINGS 1028
 
 #ifdef IMPLUS_DRIVER_MODULE
 static const driver_kernel_api_t *g_driver_api = NULL;
@@ -40,7 +40,16 @@ typedef struct {
     uint8_t *mapped_bases[GENERIC_FB_MAX_MAPPINGS];
 } framebuffer_t;
 
+typedef struct {
+    uint32_t *buffer;
+    uint64_t buffer_size;
+} double_buffer_t;
+
 static framebuffer_t g_fb;
+static double_buffer_t g_double_buffer = {
+    .buffer = NULL,
+    .buffer_size = 0u,
+};
 static int g_ready = 0;
 
 static bool map_framebuffer_chunks(uint64_t phys_addr, uint64_t size_bytes) {
@@ -94,6 +103,11 @@ bool generic_fb_set(const display_boot_framebuffer_t *framebuffer) {
     g_ready = 0;
     g_fb.mapped_chunks = 0;
 
+    if (g_double_buffer.buffer != NULL) {
+        kfree(g_double_buffer.buffer);
+        g_double_buffer.buffer = NULL;
+    }
+
     if (!framebuffer || !framebuffer->addr ||
         framebuffer->width == 0 || framebuffer->height == 0 ||
         framebuffer->pixels_per_scan_line < framebuffer->width) {
@@ -130,9 +144,20 @@ bool generic_fb_set(const display_boot_framebuffer_t *framebuffer) {
     g_fb.height = framebuffer->height;
     g_fb.pixels_per_scan_line = framebuffer->pixels_per_scan_line;
     g_fb.size_bytes = required_bytes;
+
+    uint64_t buffer_size = (uint64_t)g_fb.pixels_per_scan_line * g_fb.height * sizeof(uint32_t);
+    uint32_t *buffer = (uint32_t *)kmalloc(buffer_size);
+    if (buffer == NULL) {
+        serial_write_string("[FB] Failed to allocate back-buffer\n");
+        return false;
+    }
+
+    g_double_buffer.buffer = buffer;
+    g_double_buffer.buffer_size = buffer_size;
+
     g_ready = 1;
 
-    serial_write_string("[FB] Generic framebuffer initialized\n");
+    serial_write_string("[FB] Generic framebuffer initialized with double-buffering\n");
     return true;
 }
 
@@ -157,59 +182,75 @@ uint32_t fb_height(void) {
 }
 
 void fb_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
-    if (!g_ready) return;
+    if (!g_ready || !g_double_buffer.buffer) return;
     if (x >= g_fb.width || y >= g_fb.height) return;
 
     uint64_t pixel_index = (uint64_t)y * g_fb.pixels_per_scan_line + x;
-    volatile uint32_t *dst = resolve_pixel_ptr(pixel_index);
-    if (dst == NULL) {
-        return;
+    if (pixel_index < g_double_buffer.buffer_size / sizeof(uint32_t)) {
+        g_double_buffer.buffer[pixel_index] = color;
     }
-    *dst = color;
 }
 
 void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
-    if (!g_ready || w == 0 || h == 0) return;
-    if (x >= g_fb.width || y >= g_fb.height) return;
+    if (!g_ready || !g_double_buffer.buffer || w == 0 || h == 0) {
+        return;
+    }
+    if (x >= g_fb.width || y >= g_fb.height) {
+        return;
+    }
 
-    uint32_t x_end = x + w;
-    uint32_t y_end = y + h;
+    uint64_t x_end64 = (uint64_t)x + (uint64_t)w;
+    uint64_t y_end64 = (uint64_t)y + (uint64_t)h;
+    if (x_end64 > g_fb.width) {
+        x_end64 = g_fb.width;
+    }
+    if (y_end64 > g_fb.height) {
+        y_end64 = g_fb.height;
+    }
 
-    if (x_end > g_fb.width || x_end < x) x_end = g_fb.width;
-    if (y_end > g_fb.height || y_end < y) y_end = g_fb.height;
+    uint32_t x_end = (uint32_t)x_end64;
+    uint32_t y_end = (uint32_t)y_end64;
+    if (x_end <= x || y_end <= y) {
+        return;
+    }
 
-    for (uint32_t py = y; py < y_end; py++) {
-        uint64_t row_start = (uint64_t)py * g_fb.pixels_per_scan_line + x;
-        uint32_t remaining = x_end - x;
+    uint64_t buffer_pixels = g_double_buffer.buffer_size / sizeof(uint32_t);
+    for (uint32_t py = y; py < y_end; ++py) {
+        uint64_t row_start = (uint64_t)py * g_fb.pixels_per_scan_line;
+        uint64_t paint_begin = row_start + (uint64_t)x;
+        uint64_t paint_end = row_start + (uint64_t)x_end;
+        if (paint_begin >= buffer_pixels) {
+            break;
+        }
+        if (paint_end > buffer_pixels) {
+            paint_end = buffer_pixels;
+        }
 
-        while (remaining > 0) {
-            uint64_t byte_offset =
-                g_fb.map_offset_bytes +
-                (row_start * (uint64_t)GENERIC_FB_BYTES_PER_PIXEL);
-            uint64_t chunk_index = byte_offset / GENERIC_FB_MAP_GRANULE;
-            if (chunk_index >= g_fb.mapped_chunks) {
-                return;
-            }
-
-            uint64_t chunk_offset = byte_offset % GENERIC_FB_MAP_GRANULE;
-            uint64_t chunk_bytes_left = GENERIC_FB_MAP_GRANULE - chunk_offset;
-            uint32_t chunk_pixels_left = (uint32_t)(chunk_bytes_left / GENERIC_FB_BYTES_PER_PIXEL);
-            uint32_t run_pixels =
-                (remaining < chunk_pixels_left) ? remaining : chunk_pixels_left;
-
-            volatile uint32_t *dst =
-                (volatile uint32_t *)(void *)(g_fb.mapped_bases[chunk_index] + chunk_offset);
-            for (uint32_t i = 0; i < run_pixels; ++i) {
-                dst[i] = color;
-            }
-
-            row_start += run_pixels;
-            remaining -= run_pixels;
+        for (uint64_t idx = paint_begin; idx < paint_end; ++idx) {
+            g_double_buffer.buffer[idx] = color;
         }
     }
 }
 
 void fb_present(void) {
+    if (!g_ready || !g_double_buffer.buffer) {
+        return;
+    }
+
+    uint64_t pixels = (uint64_t)g_fb.width * g_fb.height;
+    uint64_t bytes_to_copy = pixels * GENERIC_FB_BYTES_PER_PIXEL;
+
+    if (bytes_to_copy != g_double_buffer.buffer_size) {
+        return;
+    }
+
+    for (uint64_t i = 0; i < pixels; ++i) {
+        volatile uint32_t *dst = resolve_pixel_ptr(i);
+        if (dst == NULL) {
+            continue;
+        }
+        *dst = g_double_buffer.buffer[i];
+    }
 }
 
 static const display_driver_t g_generic_fb_driver = {

@@ -7,6 +7,7 @@
 #include "../KernelConfig.h"
 #include "../ProcessManager/ProcessManager.h"
 #include "../Serial.h"
+#include "../Sync/Spinlock.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -42,6 +43,8 @@ typedef struct {
 
 static kernel_file_t g_files[FILE_MAX_FD];
 static kernel_dir_t g_dirs[FILE_MAX_DIR_HANDLE];
+static spinlock_t g_file_table_lock;
+static spinlock_t g_dir_table_lock;
 
 static void serial_write_status_with_name(os_status_t status)
 {
@@ -283,16 +286,11 @@ int64_t syscall_file_write(int32_t fd, const uint8_t *buffer, uint64_t len)
     }
 
     kernel_file_t *file = &g_files[fd];
-    if (file->offset >= file->file.size) {
-        return 0;
-    }
-
-    uint64_t remaining = (uint64_t)file->file.size - (uint64_t)file->offset;
-    uint64_t to_write = (len < remaining) ? len : remaining;
+    
     uint64_t write_total = 0;
 
-    while (write_total < to_write) {
-        uint64_t chunk64 = to_write - write_total;
+    while (write_total < len) {
+        uint64_t chunk64 = len - write_total;
         if (chunk64 > FILE_IO_CHUNK_SIZE) {
             chunk64 = FILE_IO_CHUNK_SIZE;
         }
@@ -309,9 +307,9 @@ int64_t syscall_file_write(int32_t fd, const uint8_t *buffer, uint64_t len)
         write_total += (uint64_t)chunk;
     }
 
-    file->offset += (uint32_t)to_write;
+    file->offset += (uint32_t)len;
     file_cache_invalidate(file);
-    return (int64_t)to_write;
+    return (int64_t)len;
 }
 
 int64_t syscall_file_seek(int32_t fd, int64_t offset, int32_t whence)

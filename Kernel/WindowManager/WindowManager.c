@@ -16,29 +16,29 @@
 
 #define WM_MAX_WINDOWS WM_MAX_WINDOWS_CONFIG
 
-#define WM_BORDER 2u
-#define WM_TITLEBAR_HEIGHT 20u
+#define WM_BORDER 3u
+#define WM_TITLEBAR_HEIGHT 26u
 
-#define WM_SHADOW_OFFSET 2u
-#define WM_SHADOW_SOFT_SIZE 2u
+#define WM_SHADOW_OFFSET 3u
+#define WM_SHADOW_SOFT_SIZE 4u
 #define WM_SHADOW_HARD_SIZE 2u
 
-#define WM_DESKTOP_TOP_COLOR        0xFF0F1621u
-#define WM_DESKTOP_BOTTOM_COLOR     0xFF1B2940u
-#define WM_FRAME_OUTER_COLOR        0xFF1C232Eu
-#define WM_FRAME_INNER_COLOR        0xFF313C4Eu
-#define WM_TITLEBAR_ACTIVE_TOP      0xFF6AADFFu
-#define WM_TITLEBAR_ACTIVE_BOTTOM   0xFF376FDFu
-#define WM_TITLEBAR_INACTIVE_TOP    0xFF5E6675u
-#define WM_TITLEBAR_INACTIVE_BOTTOM 0xFF434A58u
+#define WM_DESKTOP_TOP_COLOR        0xFF0A0E1Au
+#define WM_DESKTOP_BOTTOM_COLOR     0xFF161B2Bu
+#define WM_FRAME_OUTER_COLOR        0xFF151A26u
+#define WM_FRAME_INNER_COLOR        0xFF2A3648u
+#define WM_TITLEBAR_ACTIVE_TOP      0xFF5BA3F5u
+#define WM_TITLEBAR_ACTIVE_BOTTOM   0xFF2E5FD8u
+#define WM_TITLEBAR_INACTIVE_TOP    0xFF505760u
+#define WM_TITLEBAR_INACTIVE_BOTTOM 0xFF3A414Cu
 #define WM_TITLEBAR_HILITE_COLOR    0xFFB9D6FFu
 #define WM_SEPARATOR_ACTIVE_COLOR   0xFF1E3F88u
 #define WM_SEPARATOR_INACTIVE_COLOR 0xFF2D3442u
 #define WM_SHADOW_SOFT_COLOR        0xFF121821u
 #define WM_SHADOW_HARD_COLOR        0xFF090D13u
-#define WM_BUTTON_MIN_COLOR         0xFF5FCF8Fu
-#define WM_BUTTON_MAX_COLOR         0xFFE6BA56u
-#define WM_BUTTON_CLOSE_COLOR       0xFFE2646Cu
+#define WM_BUTTON_MIN_COLOR         0xFF50C878u
+#define WM_BUTTON_MAX_COLOR         0xFFFFB81Cu
+#define WM_BUTTON_CLOSE_COLOR       0xFFFF5F57u
 #define WM_BUTTON_BORDER_COLOR      0xFF1D2430u
 #define WM_BUTTON_HILITE_COLOR      0xFFFFFFFFu
 #define WM_DEFAULT_CLIENT_BG        0xFF0F131Au
@@ -189,6 +189,41 @@ static int32_t wm_find_window_index_by_pid(int32_t pid)
     }
 
     return -1;
+}
+
+static int32_t wm_find_window_index_by_pid_nth(int32_t pid, int32_t nth)
+{
+    if (pid < 0 || nth < 0) {
+        return -1;
+    }
+
+    int32_t count = 0;
+    for (int32_t i = 0; i < WM_MAX_WINDOWS; ++i) {
+        if (g_windows[i].used && g_windows[i].owner_pid == pid) {
+            if (count == nth) {
+                return i;
+            }
+            count++;
+        }
+    }
+
+    return -1;
+}
+
+static int32_t wm_count_windows_by_pid(int32_t pid)
+{
+    if (pid < 0) {
+        return 0;
+    }
+
+    int32_t count = 0;
+    for (int32_t i = 0; i < WM_MAX_WINDOWS; ++i) {
+        if (g_windows[i].used && g_windows[i].owner_pid == pid) {
+            count++;
+        }
+    }
+
+    return count;
 }
 
 static int32_t wm_find_free_slot(void)
@@ -369,6 +404,22 @@ static void wm_draw_vertical_gradient_rect(int32_t x,
     }
 }
 
+static void wm_draw_shadow_soft(int32_t x, int32_t y, uint32_t width, uint32_t height, 
+                                uint32_t screen_w, uint32_t screen_h)
+{
+    uint32_t shadow_alpha_levels[] = {0x22, 0x16, 0x0A, 0x04};
+    
+    for (uint32_t layer = 0; layer < WM_SHADOW_SOFT_SIZE && layer < 4; layer++) {
+        uint32_t offset = (layer + 1) * 1;
+        uint32_t shadow_color = (shadow_alpha_levels[layer] << 24) | 0x000000u;
+        
+        wm_draw_clipped_rect(x + (int32_t)width + (int32_t)offset, y + (int32_t)offset - 1,
+                           offset, height + offset + 1, shadow_color, screen_w, screen_h);
+        wm_draw_clipped_rect(x + (int32_t)offset - 1, y + (int32_t)height + (int32_t)offset,
+                           width + offset + 1, offset, shadow_color, screen_w, screen_h);
+    }
+}
+
 static void wm_draw_window_shadow(const wm_window_t *window, uint32_t screen_w, uint32_t screen_h)
 {
     if (!window || !window->used) {
@@ -380,35 +431,7 @@ static void wm_draw_window_shadow(const wm_window_t *window, uint32_t screen_w, 
     uint32_t outer_w = window->width + (WM_BORDER * 2u);
     uint32_t outer_h = window->height + WM_TITLEBAR_HEIGHT + WM_BORDER;
 
-    wm_draw_clipped_rect(frame_x + (int32_t)outer_w,
-                         frame_y + (int32_t)WM_SHADOW_OFFSET,
-                         WM_SHADOW_SOFT_SIZE,
-                         outer_h,
-                         WM_SHADOW_SOFT_COLOR,
-                         screen_w,
-                         screen_h);
-    wm_draw_clipped_rect(frame_x + (int32_t)WM_SHADOW_OFFSET,
-                         frame_y + (int32_t)outer_h,
-                         outer_w + WM_SHADOW_SOFT_SIZE,
-                         WM_SHADOW_SOFT_SIZE,
-                         WM_SHADOW_SOFT_COLOR,
-                         screen_w,
-                         screen_h);
-
-    wm_draw_clipped_rect(frame_x + (int32_t)outer_w + (int32_t)WM_SHADOW_SOFT_SIZE,
-                         frame_y + (int32_t)WM_SHADOW_OFFSET + (int32_t)WM_SHADOW_SOFT_SIZE,
-                         WM_SHADOW_HARD_SIZE,
-                         outer_h,
-                         WM_SHADOW_HARD_COLOR,
-                         screen_w,
-                         screen_h);
-    wm_draw_clipped_rect(frame_x + (int32_t)WM_SHADOW_OFFSET + (int32_t)WM_SHADOW_SOFT_SIZE,
-                         frame_y + (int32_t)outer_h + (int32_t)WM_SHADOW_SOFT_SIZE,
-                         outer_w + WM_SHADOW_HARD_SIZE,
-                         WM_SHADOW_HARD_SIZE,
-                         WM_SHADOW_HARD_COLOR,
-                         screen_w,
-                         screen_h);
+    wm_draw_shadow_soft(frame_x, frame_y, outer_w, outer_h, screen_w, screen_h);
 }
 
 static void wm_draw_window_buttons(int32_t title_x,
@@ -418,9 +441,9 @@ static void wm_draw_window_buttons(int32_t title_x,
                                    uint32_t screen_w,
                                    uint32_t screen_h)
 {
-    const uint32_t button_size = 6u;
-    const uint32_t button_gap = 3u;
-    const uint32_t right_padding = 6u;
+    const uint32_t button_size = 8u;
+    const uint32_t button_gap = 4u;
+    const uint32_t right_padding = 8u;
     const uint32_t total_width = (button_size * 3u) + (button_gap * 2u);
 
     if (title_w <= (right_padding * 2u) + total_width || title_h < button_size) {
@@ -428,21 +451,23 @@ static void wm_draw_window_buttons(int32_t title_x,
     }
 
     int32_t button_y = title_y + (int32_t)((title_h - button_size) / 2u);
-    int32_t min_x = title_x + (int32_t)title_w - (int32_t)right_padding - (int32_t)total_width;
+    int32_t min_x = (int32_t)title_x + (int32_t)title_w - (int32_t)right_padding - (int32_t)total_width;
     int32_t max_x = min_x + (int32_t)button_size + (int32_t)button_gap;
     int32_t close_x = max_x + (int32_t)button_size + (int32_t)button_gap;
 
-    wm_draw_clipped_rect(min_x - 1, button_y - 1, button_size + 2u, button_size + 2u, WM_BUTTON_BORDER_COLOR, screen_w, screen_h);
-    wm_draw_clipped_rect(max_x - 1, button_y - 1, button_size + 2u, button_size + 2u, WM_BUTTON_BORDER_COLOR, screen_w, screen_h);
-    wm_draw_clipped_rect(close_x - 1, button_y - 1, button_size + 2u, button_size + 2u, WM_BUTTON_BORDER_COLOR, screen_w, screen_h);
-
-    wm_draw_clipped_rect(min_x, button_y, button_size, button_size, WM_BUTTON_MIN_COLOR, screen_w, screen_h);
-    wm_draw_clipped_rect(max_x, button_y, button_size, button_size, WM_BUTTON_MAX_COLOR, screen_w, screen_h);
-    wm_draw_clipped_rect(close_x, button_y, button_size, button_size, WM_BUTTON_CLOSE_COLOR, screen_w, screen_h);
-
-    wm_draw_clipped_rect(min_x, button_y, button_size, 1u, WM_BUTTON_HILITE_COLOR, screen_w, screen_h);
-    wm_draw_clipped_rect(max_x, button_y, button_size, 1u, WM_BUTTON_HILITE_COLOR, screen_w, screen_h);
-    wm_draw_clipped_rect(close_x, button_y, button_size, 1u, WM_BUTTON_HILITE_COLOR, screen_w, screen_h);
+    uint32_t colors[] = {WM_BUTTON_MIN_COLOR, WM_BUTTON_MAX_COLOR, WM_BUTTON_CLOSE_COLOR};
+    int32_t x_positions[] = {min_x, max_x, close_x};
+    
+    for (int i = 0; i < 3; i++) {
+        int32_t bx = x_positions[i];
+        uint32_t color = colors[i];
+        
+        wm_draw_clipped_rect(bx - 1, button_y - 1, button_size + 2u, button_size + 2u, 
+                           0xFF000000u, screen_w, screen_h);
+        wm_draw_clipped_rect(bx, button_y, button_size, button_size, color, screen_w, screen_h);
+        wm_draw_clipped_rect(bx, button_y, button_size, 1u, 0xFFFFFFFFu, screen_w, screen_h);
+        wm_draw_clipped_rect(bx, button_y + 1, 1u, button_size - 2u, 0xFFFFFFFFu, screen_w, screen_h);
+    }
 }
 
 static void wm_draw_text_to_screen(int32_t x,

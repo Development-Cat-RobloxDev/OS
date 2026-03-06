@@ -66,9 +66,11 @@ isr_page_fault:
     test eax, eax
     jz .pf_resume
 .pf_hang:
+    sti
     hlt
     jmp .pf_hang
 .pf_resume:
+    sti
     add rsp, 8
     iretq
 
@@ -80,6 +82,7 @@ isr_double_fault:
     mov rcx, rbp
     call double_fault_handler
 .df_hang:
+    sti
     hlt
     jmp .df_hang
 
@@ -90,6 +93,7 @@ isr_nmi:
     mov rdx, rbp
     call nmi_handler
 .nmi_hang:
+    sti
     hlt
     jmp .nmi_hang
 
@@ -101,6 +105,7 @@ isr_general_protection:
     mov rcx, rbp
     call general_protection_fault_handler
 .gp_hang:
+    sti
     hlt
     jmp .gp_hang
 
@@ -111,6 +116,7 @@ isr_machine_check:
     mov rdx, rbp
     call machine_check_handler
 .mce_hang:
+    sti
     hlt
     jmp .mce_hang
 

@@ -78,3 +78,10 @@ typedef struct {
     void     (*set_case_sensitive_lookup)(bool);
     bool     (*get_case_sensitive_lookup)(void);
 } fat32_driver_t;
+
+typedef struct {
+    uint32_t cluster_index;
+    uint32_t cluster_value;
+} fat32_cache_t;
+
+static fat32_cache_t g_cluster_cache = {0xFFFFFFFFu, 0};

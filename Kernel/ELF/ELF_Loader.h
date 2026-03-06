@@ -16,7 +16,7 @@ typedef struct {
 } elf_module_load_policy_t;
 
 bool elf_loader_path_to_fat83(const char *path, char out_name[12]);
-bool elf_loader_load_from_fat83(const char fat_name[12],
+bool elf_loader_load_from_fat83(const char *path,
                                 const elf_load_policy_t *policy,
                                 uint64_t *entry_out);
 bool elf_loader_load_from_path(const char *path,

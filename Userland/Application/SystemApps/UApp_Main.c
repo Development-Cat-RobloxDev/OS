@@ -153,10 +153,6 @@ void _start(void)
         serial_write_string("[U] Failed to create window\n");
     }
 
-    int32_t cursor_x = 12;
-    int32_t cursor_y = 12;
-    uint8_t mouse_buttons = 0;
-
     draw_fill_rect(0, 0, APP_SCREEN_WIDTH, APP_SCREEN_HEIGHT, 0xFFFFFFFFu);
 
     uint32_t file_size = 0;
@@ -195,14 +191,22 @@ void _start(void)
         image_height, 50, 50);
     }
 
+    int32_t cursor_x = 12;
+    int32_t cursor_y = 12;
+    uint8_t mouse_buttons = 0;
+    uint32_t frame_count = 0;
+    
     while (1) {
+        int32_t events_processed = 0;
+        
         input_mouse_event_t mouse_event = {0};
         while (input_read_mouse(&mouse_event) > 0) {
             cursor_x = (int32_t)mouse_event.x;
             cursor_y = (int32_t)mouse_event.y;
             mouse_buttons = mouse_event.buttons;
+            events_processed++;
         }
-
+        
         input_keyboard_event_t key_event = {0};
         while (input_read_keyboard(&key_event) > 0) {
             if (key_event.pressed) {
@@ -214,18 +218,25 @@ void _start(void)
                     if (decoded_image) {
                         kfree(decoded_image);
                     }
+                    break;
                 }
             }
+            events_processed++;
         }
-
+        
         draw_fill_rect((uint32_t)cursor_x,
                        (uint32_t)cursor_y,
                        8,
                        8,
                        (mouse_buttons & 0x1u) ? 0xFFFF4040u : 0xFF2060FFu);
-
+        
         draw_present();
-        process_yield();
+        
+        frame_count++;
+        if (frame_count >= 2) {
+            process_yield();
+            frame_count = 0;
+        }
     }
 
 }

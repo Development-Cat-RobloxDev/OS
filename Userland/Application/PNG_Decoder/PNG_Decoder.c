@@ -793,12 +793,12 @@ static uint8_t* zlib_decompress_png(const uint8_t* data, uint32_t size,
     return out;
 }
 
-static uint8_t png_scale_to_8(uint8_t val, uint8_t bit_depth)
+static uint8_t png_scale_to_8(uint16_t val, uint8_t bit_depth)
 {
-    if (bit_depth == 8)  return val;
-    if (bit_depth == 16) return val;
+    if (bit_depth == 8)  return (uint8_t)val;
+    if (bit_depth == 16) return (uint8_t)(val >> 8);
     uint32_t max = (1u << bit_depth) - 1u;
-    return (uint8_t)((uint32_t)val * 255u / max);
+    return (uint8_t)(((uint32_t)val * 255u) / max);
 }
 
 static void convert_row_to_rgba(

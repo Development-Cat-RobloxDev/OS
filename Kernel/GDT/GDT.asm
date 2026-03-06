@@ -3,6 +3,9 @@ BITS 64
 global gdt_flush
 global tss_flush
 
+; NOTE: These constants must be kept in sync with KernelConfig.h
+; GDT_KERNEL_CODE, GDT_KERNEL_DATA, and other selectors are centrally defined in KernelConfig.h
+; If you need to change these values, update KernelConfig.h and verify the changes propagate here
 %define GDT_KERNEL_CODE 0x08
 %define GDT_KERNEL_DATA 0x10
 
